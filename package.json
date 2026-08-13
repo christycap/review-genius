@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "tsx src/index.ts",
+        "build": "node --env-file=.env --import tsx src/index.ts",
         "_format": "prettier '**/*.{ts,tsx,json,md}'",
         "format": "npm run _format -- --write",
         "format:check": "npm run _format -- --list-different"

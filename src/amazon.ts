@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { load } from "cheerio";
-import type { Input, OutputProduct } from "./schemas.js";
+import type { Input, ScrapedProduct } from "./schemas.js";
 
 const CACHE_DIRECTORY = path.resolve(".cache/amazon");
 const MAX_ATTEMPTS = 3;
@@ -88,6 +88,21 @@ const delay = (milliseconds: number) => new Promise<void>(resolve => setTimeout(
 
 function cleanText(value: string): string {
     return value.replace(/\s+/g, " ").trim();
+}
+
+function cleanReviewText(value: string): string {
+    let cleaned = cleanText(value)
+        .replace(/Brief content visible, double tap to read full content\./gi, "")
+        .replace(/Full content visible, double tap to read brief content\./gi, "");
+
+    const trailingControlLabel =
+        /\s*(?:Read more|Show less|See more|See less|Lire la suite|Afficher plus|Afficher moins|Visualizza altro|Mostra altro|Mostra meno|Leer más|Ver más|Mostrar menos)\s*$/i;
+
+    while (trailingControlLabel.test(cleaned)) {
+        cleaned = cleaned.replace(trailingControlLabel, "");
+    }
+
+    return cleanText(cleaned);
 }
 
 function looksLikeAmazonPage(html: string): boolean {
@@ -187,7 +202,7 @@ function extractImageUrl(attributes: Record<string, string | undefined>): string
     return attributes.src ?? "";
 }
 
-function parseProduct(html: string, market: Input["market"], asin: string): OutputProduct {
+function parseProduct(html: string, market: Input["market"], asin: string): ScrapedProduct {
     const $ = load(html);
     const title = cleanText($("#productTitle").first().text()) || cleanText($("title").first().text());
 
@@ -217,7 +232,7 @@ function parseProduct(html: string, market: Input["market"], asin: string): Outp
     });
     const excludedCountries = marketplaces[market].excludedCountries;
     const seenReviews = new Set<string>();
-    const reviews: OutputProduct["reviews"] = [];
+    const reviews: ScrapedProduct["reviews"] = [];
 
     $('[data-hook="review"]').each((_, element) => {
         const review = $(element);
@@ -228,15 +243,15 @@ function parseProduct(html: string, market: Input["market"], asin: string): Outp
             return;
         }
 
-        const body = cleanText(
-            review
-                .find(
-                    '[data-hook="reviewRichContentContainer"], [data-hook="review-body"], ' +
-                        '[data-hook="reviewText"], .cr-lightbox-review-body'
-                )
-                .first()
-                .text()
-        ).replace(/\s*(Visualizza altro|Afficher plus|Leer más)\s*$/i, "");
+        const body =
+            [
+                '[data-hook="reviewRichContentContainer"]',
+                ".cr-lightbox-review-body",
+                '[data-hook="review-body"]',
+                '[data-hook="reviewText"]'
+            ]
+                .map(selector => cleanReviewText(review.find(selector).first().text()))
+                .find(value => value !== "") ?? "";
         const ratingText = cleanText(
             review
                 .find('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')
@@ -258,6 +273,6 @@ function parseProduct(html: string, market: Input["market"], asin: string): Outp
     return { asin, title, productFeatures, description, productImageUrl, reviews };
 }
 
-export async function fetchProduct(market: Input["market"], asin: string): Promise<OutputProduct> {
+export async function fetchProduct(market: Input["market"], asin: string): Promise<ScrapedProduct> {
     return parseProduct(await fetchHtml(market, asin), market, asin);
 }

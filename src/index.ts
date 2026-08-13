@@ -2,7 +2,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
 import { fetchProduct } from "./amazon.js";
-import { inputSchema, outputSchema, type Input, type OutputProduct } from "./schemas.js";
+import { suggestProductImprovements } from "./deepseek.js";
+import { inputSchema, storedOutputSchema, type Input, type StoredProduct } from "./schemas.js";
 
 const INPUT_DIRECTORY = path.resolve("input");
 const OUTPUT_DIRECTORY = path.resolve("output");
@@ -35,10 +36,10 @@ async function readInput(filePath: string): Promise<Input> {
     return result.data;
 }
 
-async function readExistingOutput(filePath: string): Promise<OutputProduct[]> {
+async function readExistingOutput(filePath: string): Promise<StoredProduct[]> {
     try {
         const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
-        const result = outputSchema.safeParse(value);
+        const result = storedOutputSchema.safeParse(value);
 
         if (!result.success) {
             throw new Error(`Existing output is malformed:\n${formatZodError(result.error)}`);
@@ -53,9 +54,17 @@ async function readExistingOutput(filePath: string): Promise<OutputProduct[]> {
     }
 }
 
-async function writeOutput(filePath: string, products: OutputProduct[]): Promise<void> {
+async function writeOutput(filePath: string, products: StoredProduct[]): Promise<void> {
     await mkdir(OUTPUT_DIRECTORY, { recursive: true });
     await writeFile(filePath, `${JSON.stringify(products, null, 4)}\n`);
+}
+
+function hasLegacyReviewNoise(product: StoredProduct): boolean {
+    return product.reviews.some(
+        review =>
+            review.comment.includes("Brief content visible, double tap to read full content.") ||
+            review.comment.includes("Full content visible, double tap to read brief content.")
+    );
 }
 
 async function processInputFile(filename: string): Promise<string[]> {
@@ -63,26 +72,50 @@ async function processInputFile(filename: string): Promise<string[]> {
     const outputPath = path.join(OUTPUT_DIRECTORY, filename);
     const input = await readInput(inputPath);
     const products = await readExistingOutput(outputPath);
-    const completedAsins = new Set(products.map(product => product.asin));
     const errors: string[] = [];
 
     console.log(`\n${filename}: ${input.asins.length} ASIN(s), market=${input.market}`);
 
     for (const [index, asin] of input.asins.entries()) {
-        if (completedAsins.has(asin)) {
+        const existingIndex = products.findIndex(product => product.asin === asin);
+        const existingProduct = products[existingIndex];
+        const needsReviewCleanup =
+            existingProduct !== undefined && hasLegacyReviewNoise(existingProduct);
+
+        if (existingProduct?.suggestions !== undefined && !needsReviewCleanup) {
             console.log(`  [${index + 1}/${input.asins.length}] ${asin}: already complete`);
             continue;
         }
 
-        console.log(`  [${index + 1}/${input.asins.length}] ${asin}: fetching...`);
-
         try {
-            const product = await fetchProduct(input.market, asin);
-            products.push(product);
+            let scrapedProduct = existingProduct;
+
+            if (scrapedProduct === undefined || needsReviewCleanup) {
+                const action = needsReviewCleanup
+                    ? "re-parsing product to clean reviews..."
+                    : "fetching...";
+                console.log(`  [${index + 1}/${input.asins.length}] ${asin}: ${action}`);
+                scrapedProduct = await fetchProduct(input.market, asin);
+            } else {
+                console.log(
+                    `  [${index + 1}/${input.asins.length}] ${asin}: using existing product data`
+                );
+            }
+
+            console.log(`    Requesting DeepSeek suggestions...`);
+            const suggestions = await suggestProductImprovements(input.market, scrapedProduct);
+            const completedProduct: StoredProduct = { ...scrapedProduct, suggestions };
+
+            if (existingIndex === -1) {
+                products.push(completedProduct);
+            } else {
+                products[existingIndex] = completedProduct;
+            }
+
             await writeOutput(outputPath, products);
             console.log(
                 `  [${index + 1}/${input.asins.length}] ${asin}: saved (${
-                    product.reviews.length
+                    scrapedProduct.reviews.length
                 } reviews)`
             );
         } catch (error) {
