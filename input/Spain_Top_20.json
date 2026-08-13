@@ -1,22 +1,25 @@
-[
-  "B07Z5LKT1Q",
-  "B07Z5L3369",
-  "B07Z5LF3G3",
-  "B07Z5LM72J",
-  "B07Z5LKRMF",
-  "B07Z9TXBZF",
-  "B07Z5LB6Q1",
-  "B07Z5L8VJL",
-  "B07Z5M6GRQ",
-  "B07Z5LFB1F",
-  "B07Z5LC8CB",
-  "B07Z5LFPT6",
-  "B07Z5L333N",
-  "B07Z5M6GP9",
-  "B07Z5LFB23",
-  "B08M3VTMCF",
-  "B08M3LLFHQ",
-  "B07Z5LBN3T",
-  "B07Z5LKRNS",
-  "B07Z9V4BXG"
-]
+{
+    "market": "es",
+    "asins": [
+        "B07Z5LKT1Q",
+        "B07Z5L3369",
+        "B07Z5LF3G3",
+        "B07Z5LM72J",
+        "B07Z5LKRMF",
+        "B07Z9TXBZF",
+        "B07Z5LB6Q1",
+        "B07Z5L8VJL",
+        "B07Z5M6GRQ",
+        "B07Z5LFB1F",
+        "B07Z5LC8CB",
+        "B07Z5LFPT6",
+        "B07Z5L333N",
+        "B07Z5M6GP9",
+        "B07Z5LFB23",
+        "B08M3VTMCF",
+        "B08M3LLFHQ",
+        "B07Z5LBN3T",
+        "B07Z5LKRNS",
+        "B07Z9V4BXG"
+    ]
+}
