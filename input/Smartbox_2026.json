@@ -1,0 +1,14 @@
+[
+    {
+        "market": "fr",
+        "asins": ["B07WR8JKKP", "B07WNHC2DP"]
+    },
+    {
+        "market": "it",
+        "asins": ["B07X5BWRFB", "B07X24TCCH"]
+    },
+    {
+        "market": "es",
+        "asins": ["B07Z5LKT1Q", "B07Z5L3369"]
+    }
+]

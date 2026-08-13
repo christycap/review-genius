@@ -1,0 +1,77 @@
+[
+    {
+        "market": "fr",
+        "asins": [
+            "B07WR8JKKP",
+            "B07WNHC2DP",
+            "B08L7QXTNL",
+            "B07WNH9HKL",
+            "B08L7SJCJ8",
+            "B07WQWQ82H",
+            "B07WNHCPJV",
+            "B07WS91JZ6",
+            "B07WR9VHWN",
+            "B07WNH91DM",
+            "B07WS8LCZ1",
+            "B07WNH8PVT",
+            "B07WQWPTZC",
+            "B07WRBFYNF",
+            "B0CHMVKW52",
+            "B07WNH8MYL",
+            "B07WS9LLXG",
+            "B07WS8RJX4",
+            "B0C6TZXNHS",
+            "B08L7TRBV6"
+        ]
+    },
+    {
+        "market": "it",
+        "asins": [
+            "B07X5BWRFB",
+            "B07X24TCCH",
+            "B07X112NFP",
+            "B07X68CCQ7",
+            "B07X113F8Z",
+            "B07X34JRCV",
+            "B07X5BWJ6S",
+            "B07X34HMH3",
+            "B07X687DPK",
+            "B07X34H2WY",
+            "B07X68BFN9",
+            "B07X34HCWH",
+            "B07X47QFSN",
+            "B07X34K7D4",
+            "B07X47P3MF",
+            "B07X5BVF7G",
+            "B0BJ2KTXT8",
+            "B07X34HMJ3",
+            "B07X687DQC",
+            "B07X687DLB"
+        ]
+    },
+    {
+        "market": "es",
+        "asins": [
+            "B07Z5LKT1Q",
+            "B07Z5L3369",
+            "B07Z5LF3G3",
+            "B07Z5LM72J",
+            "B07Z5LKRMF",
+            "B07Z9TXBZF",
+            "B07Z5LB6Q1",
+            "B07Z5L8VJL",
+            "B07Z5M6GRQ",
+            "B07Z5LFB1F",
+            "B07Z5LC8CB",
+            "B07Z5LFPT6",
+            "B07Z5L333N",
+            "B07Z5M6GP9",
+            "B07Z5LFB23",
+            "B08M3VTMCF",
+            "B08M3LLFHQ",
+            "B07Z5LBN3T",
+            "B07Z5LKRNS",
+            "B07Z9V4BXG"
+        ]
+    }
+]

@@ -1,7 +1,8 @@
 import { z, ZodError } from "zod";
+import { runExternalRequest } from "./external-request.js";
 import {
     suggestionsSchema,
-    type Input,
+    type Market,
     type ProductSuggestions,
     type ScrapedProduct
 } from "./schemas.js";
@@ -101,48 +102,52 @@ function parseSuggestions(content: string): ProductSuggestions {
 
 async function requestSuggestions(
     apiKey: string,
-    market: Input["market"],
+    market: Market,
     product: ScrapedProduct
 ): Promise<ProductSuggestions> {
     let response: Response;
+    let responseText: string;
 
     try {
-        response = await fetch(DEEPSEEK_URL, {
-            method: "POST",
-            headers: {
-                authorization: `Bearer ${apiKey}`,
-                "content-type": "application/json"
-            },
-            body: JSON.stringify({
-                model: DEEPSEEK_MODEL,
-                thinking: { type: "disabled" },
-                messages: [
-                    { role: "system", content: SYSTEM_PROMPT },
-                    {
-                        role: "user",
-                        content: `Improve this product listing and return the requested JSON object:\n${JSON.stringify(
-                            {
-                                market,
-                                title: product.title,
-                                productFeatures: product.productFeatures,
-                                description: product.description,
-                                reviews: product.reviews
-                            }
-                        )}`
-                    }
-                ],
-                response_format: { type: "json_object" },
-                max_tokens: 4_096,
-                temperature: 0.2
-            }),
-            signal: AbortSignal.timeout(120_000)
-        });
+        ({ response, responseText } = await runExternalRequest(async () => {
+            const response = await fetch(DEEPSEEK_URL, {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${apiKey}`,
+                    "content-type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: DEEPSEEK_MODEL,
+                    thinking: { type: "disabled" },
+                    messages: [
+                        { role: "system", content: SYSTEM_PROMPT },
+                        {
+                            role: "user",
+                            content: `Improve this product listing and return the requested JSON object:\n${JSON.stringify(
+                                {
+                                    market,
+                                    title: product.title,
+                                    productFeatures: product.productFeatures,
+                                    description: product.description,
+                                    reviews: product.reviews
+                                }
+                            )}`
+                        }
+                    ],
+                    response_format: { type: "json_object" },
+                    max_tokens: 4_096,
+                    temperature: 0.2
+                }),
+                signal: AbortSignal.timeout(120_000)
+            });
+
+            return { response, responseText: await response.text() };
+        }));
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new DeepSeekError(`DeepSeek request failed: ${message}`, true);
     }
 
-    const responseText = await response.text();
     let responseValue: unknown;
 
     try {
@@ -183,7 +188,7 @@ async function requestSuggestions(
 }
 
 export async function suggestProductImprovements(
-    market: Input["market"],
+    market: Market,
     product: ScrapedProduct
 ): Promise<ProductSuggestions> {
     const apiKey = process.env.DEEPSEEK_API_KEY?.trim();

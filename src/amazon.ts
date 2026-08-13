@@ -1,16 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { load } from "cheerio";
-import type { Input, ScrapedProduct } from "./schemas.js";
+import { runExternalRequest } from "./external-request.js";
+import type { Market, ScrapedProduct } from "./schemas.js";
 
 const CACHE_DIRECTORY = path.resolve(".cache/amazon");
 const MAX_ATTEMPTS = 3;
 const REQUEST_DELAY_MS = 2_000;
 
-const marketplaces: Record<
-    Input["market"],
-    { domain: string; language: string; excludedCountries: string[] }
-> = {
+const marketplaces: Record<Market, { domain: string; language: string; excludedCountries: string[] }> = {
     fr: {
         domain: "amazon.fr",
         language: "fr-FR,fr;q=0.9,en;q=0.5",
@@ -128,7 +126,7 @@ async function readCachedHtml(cachePath: string): Promise<string | undefined> {
     }
 }
 
-async function fetchHtml(market: Input["market"], asin: string): Promise<string> {
+async function fetchHtml(market: Market, asin: string): Promise<string> {
     const marketplace = marketplaces[market];
     const cachePath = path.join(CACHE_DIRECTORY, market, `${asin}.html`);
     const cached = await readCachedHtml(cachePath);
@@ -144,18 +142,21 @@ async function fetchHtml(market: Input["market"], asin: string): Promise<string>
         await delay(REQUEST_DELAY_MS);
 
         try {
-            const response = await fetch(url, {
-                headers: {
-                    "user-agent":
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-                        "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-                    "accept-language": marketplace.language,
-                    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
-                },
-                redirect: "follow",
-                signal: AbortSignal.timeout(30_000)
+            const { response, html } = await runExternalRequest(async () => {
+                const response = await fetch(url, {
+                    headers: {
+                        "user-agent":
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+                            "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+                        "accept-language": marketplace.language,
+                        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+                    },
+                    redirect: "follow",
+                    signal: AbortSignal.timeout(30_000)
+                });
+
+                return { response, html: await response.text() };
             });
-            const html = await response.text();
 
             if (!response.ok) {
                 throw new AmazonScrapingError(`Amazon returned HTTP ${response.status}`);
@@ -202,7 +203,7 @@ function extractImageUrl(attributes: Record<string, string | undefined>): string
     return attributes.src ?? "";
 }
 
-function parseProduct(html: string, market: Input["market"], asin: string): ScrapedProduct {
+function parseProduct(html: string, market: Market, asin: string): ScrapedProduct {
     const $ = load(html);
     const title = cleanText($("#productTitle").first().text()) || cleanText($("title").first().text());
 
@@ -273,6 +274,6 @@ function parseProduct(html: string, market: Input["market"], asin: string): Scra
     return { asin, title, productFeatures, description, productImageUrl, reviews };
 }
 
-export async function fetchProduct(market: Input["market"], asin: string): Promise<ScrapedProduct> {
+export async function fetchProduct(market: Market, asin: string): Promise<ScrapedProduct> {
     return parseProduct(await fetchHtml(market, asin), market, asin);
 }

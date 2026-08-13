@@ -4,11 +4,13 @@ const asinSchema = z
     .string()
     .regex(/^[A-Z0-9]{10}$/, "must be a 10-character Amazon ASIN using A-Z and 0-9");
 
-export const inputSchema = z
+export const marketSchema = z.enum(["fr", "it", "es"], {
+    error: "must be one of: fr, it, es"
+});
+
+const marketInputSchema = z
     .object({
-        market: z.enum(["fr", "it", "es"], {
-            error: "must be one of: fr, it, es"
-        }),
+        market: marketSchema,
         asins: z.array(asinSchema).min(1, "must contain at least one ASIN")
     })
     .strict()
@@ -25,6 +27,25 @@ export const inputSchema = z
             }
 
             seen.add(asin);
+        });
+    });
+
+export const inputSchema = z
+    .array(marketInputSchema)
+    .min(1, "must contain at least one market")
+    .superRefine((markets, context) => {
+        const seen = new Set<string>();
+
+        markets.forEach(({ market }, index) => {
+            if (seen.has(market)) {
+                context.addIssue({
+                    code: "custom",
+                    path: [index, "market"],
+                    message: `duplicate market: ${market}`
+                });
+            }
+
+            seen.add(market);
         });
     });
 
@@ -74,11 +95,45 @@ export const productSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema
 });
 
-export const storedOutputSchema = z.array(storedProductSchema);
-export const outputSchema = z.array(productSchema);
+const storedMarketOutputSchema = z
+    .object({
+        market: marketSchema,
+        products: z.array(storedProductSchema)
+    })
+    .strict();
+
+const marketOutputSchema = z
+    .object({
+        market: marketSchema,
+        products: z.array(productSchema)
+    })
+    .strict();
+
+function rejectDuplicateOutputMarkets(markets: { market: string }[], context: z.RefinementCtx): void {
+    const seen = new Set<string>();
+
+    markets.forEach(({ market }, index) => {
+        if (seen.has(market)) {
+            context.addIssue({
+                code: "custom",
+                path: [index, "market"],
+                message: `duplicate market: ${market}`
+            });
+        }
+
+        seen.add(market);
+    });
+}
+
+export const storedOutputSchema = z
+    .array(storedMarketOutputSchema)
+    .superRefine(rejectDuplicateOutputMarkets);
+export const outputSchema = z.array(marketOutputSchema).superRefine(rejectDuplicateOutputMarkets);
 
 export type Input = z.infer<typeof inputSchema>;
+export type Market = z.infer<typeof marketSchema>;
 export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
 export type StoredProduct = z.infer<typeof storedProductSchema>;
+export type StoredOutput = z.infer<typeof storedOutputSchema>;
 export type OutputProduct = z.infer<typeof productSchema>;
