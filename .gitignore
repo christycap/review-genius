@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+output/
 
 .env
 !.env.example
@@ -11,4 +12,3 @@ npm-debug.log*
 
 .idea/
 .vscode/
-
