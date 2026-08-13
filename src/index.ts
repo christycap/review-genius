@@ -1,8 +1,7 @@
-import { loadEnvFile } from "node:process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
-import { fetchProduct } from "./rainforest.js";
+import { fetchProduct } from "./amazon.js";
 import { inputSchema, outputSchema, type Input, type OutputProduct } from "./schemas.js";
 
 const INPUT_DIRECTORY = path.resolve("input");
@@ -59,7 +58,7 @@ async function writeOutput(filePath: string, products: OutputProduct[]): Promise
     await writeFile(filePath, `${JSON.stringify(products, null, 4)}\n`);
 }
 
-async function processInputFile(filename: string, apiKey: string): Promise<string[]> {
+async function processInputFile(filename: string): Promise<string[]> {
     const inputPath = path.join(INPUT_DIRECTORY, filename);
     const outputPath = path.join(OUTPUT_DIRECTORY, filename);
     const input = await readInput(inputPath);
@@ -78,7 +77,7 @@ async function processInputFile(filename: string, apiKey: string): Promise<strin
         console.log(`  [${index + 1}/${input.asins.length}] ${asin}: fetching...`);
 
         try {
-            const product = await fetchProduct(apiKey, input.market, asin);
+            const product = await fetchProduct(input.market, asin);
             products.push(product);
             await writeOutput(outputPath, products);
             console.log(
@@ -97,19 +96,6 @@ async function processInputFile(filename: string, apiKey: string): Promise<strin
 }
 
 async function main(): Promise<void> {
-    try {
-        loadEnvFile();
-    } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-            throw error;
-        }
-    }
-
-    const apiKey = process.env.RAINFOREST_API_KEY?.trim();
-    if (!apiKey) {
-        throw new Error("RAINFOREST_API_KEY is missing. Add it to .env before running the build.");
-    }
-
     const entries = await readdir(INPUT_DIRECTORY, { withFileTypes: true });
     const filenames = entries
         .filter(entry => entry.isFile() && path.extname(entry.name) === ".json")
@@ -124,7 +110,7 @@ async function main(): Promise<void> {
     const errors: string[] = [];
 
     for (const filename of filenames) {
-        errors.push(...(await processInputFile(filename, apiKey)));
+        errors.push(...(await processInputFile(filename)));
     }
 
     if (errors.length > 0) {

@@ -39,7 +39,7 @@ export const productSchema = z.object({
     productFeatures: z.array(z.string()),
     description: z.string(),
     productImageUrl: z.string(),
-    reviews: z.array(reviewSchema).max(20)
+    reviews: z.array(reviewSchema)
 });
 
 export const outputSchema = z.array(productSchema);
