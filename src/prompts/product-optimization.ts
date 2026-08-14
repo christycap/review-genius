@@ -5,6 +5,65 @@
 export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 3 as const;
 export const AMAZON_TITLE_CHARACTER_LIMIT = 75;
 
+export const PRODUCT_SUGGESTIONS_JSON_SCHEMA = {
+    type: "object",
+    properties: {
+        title: {
+            type: "object",
+            properties: {
+                value: { type: "string", description: "The improved product title." },
+                reasoning: { type: "string", description: "A concise English editorial rationale." }
+            },
+            required: ["value", "reasoning"],
+            additionalProperties: false
+        },
+        productFeatures: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Three to five improved product feature bullets."
+                },
+                reasoning: { type: "string", description: "A concise English editorial rationale." }
+            },
+            required: ["value", "reasoning"],
+            additionalProperties: false
+        },
+        description: {
+            type: "object",
+            properties: {
+                value: { type: "string", description: "The improved product description." },
+                reasoning: { type: "string", description: "A concise English editorial rationale." }
+            },
+            required: ["value", "reasoning"],
+            additionalProperties: false
+        }
+    },
+    required: ["title", "productFeatures", "description"],
+    additionalProperties: false
+} as const;
+
+type ProductOptimizationContext = {
+    title: string;
+    productFeatures: string[];
+    description: string;
+    reviews: unknown;
+};
+
+export function createProductOptimizationUserPrompt(
+    market: string,
+    product: ProductOptimizationContext
+): string {
+    return `Improve this product listing and return the requested JSON object:\n${JSON.stringify({
+        market,
+        title: product.title,
+        productFeatures: product.productFeatures,
+        description: product.description,
+        reviews: product.reviews
+    })}`;
+}
+
 /**
  * Editorial framework reviewed on 2026-08-14 and distilled from:
  *

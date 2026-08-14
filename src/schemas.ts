@@ -99,14 +99,20 @@ export const suggestionsSchema = z
     })
     .strict();
 
+export const suggestionProviderSchema = z.enum(["deepseek", "gemini"]);
+
 export const storedProductSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema.optional(),
-    suggestionPromptVersion: z.number().int().positive().optional()
+    suggestionPromptVersion: z.number().int().positive().optional(),
+    suggestionProvider: suggestionProviderSchema.optional(),
+    suggestionModel: z.string().min(1).optional()
 });
 
 export const productSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema,
-    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION)
+    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION),
+    suggestionProvider: suggestionProviderSchema,
+    suggestionModel: z.string().min(1)
 });
 
 const storedMarketOutputSchema = z
@@ -163,7 +169,9 @@ const legacyReviewSchema = reviewSchema.omit({ title: true });
 const legacyStoredProductSchema = scrapedProductSchema.omit({ reviews: true }).extend({
     reviews: z.array(legacyReviewSchema),
     suggestions: suggestionsSchema.optional(),
-    suggestionPromptVersion: z.number().int().positive().optional()
+    suggestionPromptVersion: z.number().int().positive().optional(),
+    suggestionProvider: suggestionProviderSchema.optional(),
+    suggestionModel: z.string().min(1).optional()
 });
 const legacyStoredMarketOutputSchema = z
     .object({
@@ -181,6 +189,7 @@ export type Market = z.infer<typeof marketSchema>;
 export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
 export type ProductReviews = z.infer<typeof productReviewsSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
+export type SuggestionProvider = z.infer<typeof suggestionProviderSchema>;
 export type StoredProduct = z.infer<typeof storedProductSchema>;
 export type StoredOutput = z.infer<typeof storedOutputSchema>;
 export type OutputProduct = z.infer<typeof productSchema>;

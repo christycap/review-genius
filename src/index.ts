@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
+import { createSuggestionService, type SuggestionService } from "./ai.js";
 import { fetchProduct } from "./amazon.js";
-import { suggestProductImprovements } from "./deepseek.js";
+import { DEEPSEEK_MODEL } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
 import {
     SUGGESTION_PROMPT_VERSION,
@@ -150,6 +151,21 @@ function hasLegacyReviewNoise(product: StoredProduct): boolean {
     );
 }
 
+function hasCurrentSuggestions(product: StoredProduct, suggestionService: SuggestionService): boolean {
+    if (
+        product.suggestions === undefined ||
+        product.suggestionPromptVersion !== SUGGESTION_PROMPT_VERSION
+    ) {
+        return false;
+    }
+
+    const cachedProvider = product.suggestionProvider ?? "deepseek";
+    const cachedModel =
+        product.suggestionModel ?? (cachedProvider === "deepseek" ? DEEPSEEK_MODEL : undefined);
+
+    return cachedProvider === suggestionService.provider && cachedModel === suggestionService.model;
+}
+
 function reconcileOutput(input: Input, existingOutput: StoredOutput): StoredOutput {
     return {
         title: DATASET_TITLE,
@@ -167,7 +183,10 @@ function reconcileOutput(input: Input, existingOutput: StoredOutput): StoredOutp
     };
 }
 
-async function processDataset(filename: string): Promise<{ errors: string[]; output: StoredOutput }> {
+async function processDataset(
+    filename: string,
+    suggestionService: SuggestionService
+): Promise<{ errors: string[]; output: StoredOutput }> {
     const inputPath = path.join(INPUT_DIRECTORY, filename);
     const input = await readInput(inputPath);
     const existingOutput = await readExistingOutput();
@@ -176,6 +195,7 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
     const asinCount = input.reduce((count, market) => count + market.asins.length, 0);
 
     console.log(`${filename}: ${input.length} market(s), ${asinCount} ASIN(s)`);
+    console.log(`AI provider: ${suggestionService.providerName} (${suggestionService.model})`);
 
     for (const [marketIndex, { market, asins }] of input.entries()) {
         const marketOutput = output.markets[marketIndex];
@@ -189,10 +209,12 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
                 (existingProduct !== undefined && hasLegacyReviewNoise(existingProduct));
 
             if (
-                existingProduct?.suggestions !== undefined &&
-                existingProduct.suggestionPromptVersion === SUGGESTION_PROMPT_VERSION &&
+                existingProduct !== undefined &&
+                hasCurrentSuggestions(existingProduct, suggestionService) &&
                 !needsReviewRefresh
             ) {
+                existingProduct.suggestionProvider = suggestionService.provider;
+                existingProduct.suggestionModel = suggestionService.model;
                 console.log(`  [${index + 1}/${asins.length}] ${asin}: already complete`);
                 continue;
             }
@@ -210,12 +232,14 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
                     console.log(`  [${index + 1}/${asins.length}] ${asin}: using existing product data`);
                 }
 
-                console.log(`    Requesting DeepSeek suggestions...`);
-                const suggestions = await suggestProductImprovements(market, scrapedProduct);
+                console.log(`    Requesting ${suggestionService.providerName} suggestions...`);
+                const suggestions = await suggestionService.suggest(market, scrapedProduct);
                 const completedProduct: StoredProduct = {
                     ...scrapedProduct,
                     suggestions,
-                    suggestionPromptVersion: SUGGESTION_PROMPT_VERSION
+                    suggestionPromptVersion: SUGGESTION_PROMPT_VERSION,
+                    suggestionProvider: suggestionService.provider,
+                    suggestionModel: suggestionService.model
                 };
 
                 if (existingIndex === -1) {
@@ -243,7 +267,8 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
 }
 
 async function main(): Promise<void> {
-    const { errors, output } = await processDataset(DATASET_FILENAME);
+    const suggestionService = createSuggestionService();
+    const { errors, output } = await processDataset(DATASET_FILENAME, suggestionService);
     console.log("\nGenerating self-contained HTML report...");
     await generateReport(output, REPORT_DIRECTORY);
     console.log(`Report generated at ${path.join(REPORT_DIRECTORY, "index.html")}`);
