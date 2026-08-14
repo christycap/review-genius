@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const SUGGESTION_PROMPT_VERSION = 2 as const;
+
 const asinSchema = z
     .string()
     .regex(/^[A-Z0-9]{10}$/, "must be a 10-character Amazon ASIN using A-Z and 0-9");
@@ -97,11 +99,13 @@ export const suggestionsSchema = z
     .strict();
 
 export const storedProductSchema = scrapedProductSchema.extend({
-    suggestions: suggestionsSchema.optional()
+    suggestions: suggestionsSchema.optional(),
+    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION).optional()
 });
 
 export const productSchema = scrapedProductSchema.extend({
-    suggestions: suggestionsSchema
+    suggestions: suggestionsSchema,
+    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION)
 });
 
 const storedMarketOutputSchema = z
@@ -142,7 +146,8 @@ export const outputSchema = z.array(marketOutputSchema).superRefine(rejectDuplic
 const legacyReviewSchema = reviewSchema.omit({ title: true });
 const legacyStoredProductSchema = scrapedProductSchema.omit({ reviews: true }).extend({
     reviews: z.array(legacyReviewSchema),
-    suggestions: suggestionsSchema.optional()
+    suggestions: suggestionsSchema.optional(),
+    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION).optional()
 });
 const legacyStoredMarketOutputSchema = z
     .object({

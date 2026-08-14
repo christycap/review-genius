@@ -43,13 +43,14 @@ Improve the supplied title, product feature list, and description. Return only a
 }
 
 Rules:
-- Infer the source language from the supplied listing. Write every suggested value and every reasoning field in that same language.
+- Infer the source language from the supplied listing. Write every suggested value in that same source language; do not translate the proposed listing copy into English.
+- Write every reasoning field in English, regardless of the listing's source language. This is mandatory so the explanations remain consistent across markets.
 - Use only facts present in the title, product features, or description. Never invent specifications, quantities, certifications, rankings, guarantees, availability, prices, or product benefits.
 - Review context includes Amazon's aggregate rating and total review count, plus extracted review items with rating, title, and comment. Use it to identify what customers value or find unclear, but subjective review claims are not product facts. Do not quote or closely copy review text.
 - Make the title clear, natural, concise, and easy to scan. Avoid keyword stuffing, repetition, and unsupported superlatives.
 - Make the feature list easy to scan, remove redundancy, and put customer-relevant information first without losing important factual details.
 - Make the description coherent, persuasive, and well structured while preserving the meaning of the source.
-- Each reasoning field must be a short, user-facing justification of the concrete editorial improvements, not hidden chain-of-thought or a step-by-step analysis.
+- Each reasoning field must be a short English, user-facing justification of the concrete editorial improvements, not hidden chain-of-thought or a step-by-step analysis.
 - Do not include markdown, commentary, the ASIN, or any properties outside the specified JSON shape.`;
 
 class DeepSeekError extends Error {

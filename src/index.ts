@@ -5,6 +5,7 @@ import { fetchProduct } from "./amazon.js";
 import { suggestProductImprovements } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
 import {
+    SUGGESTION_PROMPT_VERSION,
     inputSchema,
     legacyStoredOutputSchema,
     storedOutputSchema,
@@ -158,7 +159,11 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
                 existingOutput.productsNeedingReviewRefresh.has(productKey(market, asin)) ||
                 (existingProduct !== undefined && hasLegacyReviewNoise(existingProduct));
 
-            if (existingProduct?.suggestions !== undefined && !needsReviewRefresh) {
+            if (
+                existingProduct?.suggestions !== undefined &&
+                existingProduct.suggestionPromptVersion === SUGGESTION_PROMPT_VERSION &&
+                !needsReviewRefresh
+            ) {
                 console.log(`  [${index + 1}/${asins.length}] ${asin}: already complete`);
                 continue;
             }
@@ -178,7 +183,11 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
 
                 console.log(`    Requesting DeepSeek suggestions...`);
                 const suggestions = await suggestProductImprovements(market, scrapedProduct);
-                const completedProduct: StoredProduct = { ...scrapedProduct, suggestions };
+                const completedProduct: StoredProduct = {
+                    ...scrapedProduct,
+                    suggestions,
+                    suggestionPromptVersion: SUGGESTION_PROMPT_VERSION
+                };
 
                 if (existingIndex === -1) {
                     marketOutput.products.push(completedProduct);

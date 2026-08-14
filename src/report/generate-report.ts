@@ -13,7 +13,7 @@ const CACHED_LOGO_PATH = path.join(REPORT_CACHE_DIRECTORY, "numberly-logo.svg");
 const CACHED_PRODUCT_IMAGES_DIRECTORY = path.join(REPORT_CACHE_DIRECTORY, "product-images");
 
 const INDEX_HTML = `<!doctype html>
-<html lang="fr">
+<html lang="en">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -31,7 +31,7 @@ const INDEX_HTML = `<!doctype html>
     </head>
     <body>
         <div id="root"></div>
-        <noscript>Review Genius 2.0 nécessite JavaScript pour naviguer dans le rapport.</noscript>
+        <noscript>Review Genius 2.0 requires JavaScript to navigate the report.</noscript>
         <script src="./assets/app.js"></script>
     </body>
 </html>
