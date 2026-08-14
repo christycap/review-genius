@@ -8,8 +8,10 @@ import type { StoredOutput } from "../schemas.js";
 
 const executeFile = promisify(execFile);
 const LOGO_URL = "https://numberly.com/assets/numberly-logo.eeb462ba.svg";
+const FAVICON_URL = "https://numberly.com/favicon.ico";
 const REPORT_CACHE_DIRECTORY = path.resolve(".cache/report");
 const CACHED_LOGO_PATH = path.join(REPORT_CACHE_DIRECTORY, "numberly-logo.svg");
+const CACHED_FAVICON_PATH = path.join(REPORT_CACHE_DIRECTORY, "numberly-favicon.ico");
 const CACHED_PRODUCT_IMAGES_DIRECTORY = path.join(REPORT_CACHE_DIRECTORY, "product-images");
 
 function escapeHtmlText(value: string): string {
@@ -25,6 +27,7 @@ function createIndexHtml(reportTitle: string): string {
         <meta name="color-scheme" content="light dark" />
         <meta name="theme-color" content="#008099" />
         <title>Review Genius 2.0 · ${escapeHtmlText(reportTitle)}</title>
+        <link rel="icon" type="image/x-icon" href="./assets/favicon.ico" />
         <script>
             try {
                 const savedTheme = localStorage.getItem("review-genius-theme");
@@ -65,6 +68,34 @@ async function ensureLogoIsCached(): Promise<void> {
 
     await mkdir(REPORT_CACHE_DIRECTORY, { recursive: true });
     await writeFile(CACHED_LOGO_PATH, logo);
+}
+
+function isIcoFile(value: Uint8Array): boolean {
+    return value.byteLength >= 6 && value[0] === 0 && value[1] === 0 && value[2] === 1 && value[3] === 0;
+}
+
+async function ensureFaviconIsCached(): Promise<void> {
+    try {
+        const cached = await readFile(CACHED_FAVICON_PATH);
+        if (isIcoFile(cached)) return;
+    } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+            throw error;
+        }
+    }
+
+    const favicon = await runExternalRequest(async () => {
+        const response = await fetch(FAVICON_URL, { signal: AbortSignal.timeout(30_000) });
+        if (!response.ok) throw new Error(`Numberly favicon returned HTTP ${response.status}`);
+        return new Uint8Array(await response.arrayBuffer());
+    });
+
+    if (!isIcoFile(favicon)) {
+        throw new Error("Numberly favicon response was not a valid ICO file");
+    }
+
+    await mkdir(REPORT_CACHE_DIRECTORY, { recursive: true });
+    await writeFile(CACHED_FAVICON_PATH, favicon);
 }
 
 async function readCachedImage(filePath: string): Promise<Uint8Array | undefined> {
@@ -136,12 +167,14 @@ export async function generateReport(data: StoredOutput, reportDirectory: string
     const assetsDirectory = path.join(reportDirectory, "assets");
     await mkdir(assetsDirectory, { recursive: true });
     await ensureLogoIsCached();
+    await ensureFaviconIsCached();
     const localReportData = await createLocalReportData(data, assetsDirectory);
 
     await Promise.all([
         writeFile(path.join(reportDirectory, "index.html"), createIndexHtml(data.title)),
         writeFile(path.join(assetsDirectory, "data.json"), `${JSON.stringify(data, null, 4)}\n`),
         copyFile(CACHED_LOGO_PATH, path.join(assetsDirectory, "numberly-logo.svg")),
+        copyFile(CACHED_FAVICON_PATH, path.join(assetsDirectory, "favicon.ico")),
         build({
             entryPoints: [path.resolve("src/report/main.tsx")],
             outfile: path.join(assetsDirectory, "app.js"),
