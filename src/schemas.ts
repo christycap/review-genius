@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SUGGESTION_PROMPT_VERSION = 2 as const;
+export const SUGGESTION_PROMPT_VERSION = 3 as const;
 
 const asinSchema = z
     .string()
@@ -100,7 +100,7 @@ export const suggestionsSchema = z
 
 export const storedProductSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema.optional(),
-    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION).optional()
+    suggestionPromptVersion: z.number().int().positive().optional()
 });
 
 export const productSchema = scrapedProductSchema.extend({
@@ -147,7 +147,7 @@ const legacyReviewSchema = reviewSchema.omit({ title: true });
 const legacyStoredProductSchema = scrapedProductSchema.omit({ reviews: true }).extend({
     reviews: z.array(legacyReviewSchema),
     suggestions: suggestionsSchema.optional(),
-    suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION).optional()
+    suggestionPromptVersion: z.number().int().positive().optional()
 });
 const legacyStoredMarketOutputSchema = z
     .object({

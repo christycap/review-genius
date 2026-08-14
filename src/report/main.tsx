@@ -168,6 +168,38 @@ function CopyButton({ value }: { value: string }) {
     );
 }
 
+function countCharacters(value: string): number {
+    return Array.from(value).length;
+}
+
+function CharacterMetrics({ count, originalCount }: { count: number; originalCount?: number }) {
+    const difference = originalCount === undefined ? undefined : count - originalCount;
+
+    return (
+        <div className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums">
+            <Badge variant="outline" className="bg-background/70 font-mono text-muted-foreground">
+                {count.toLocaleString("en")} chars
+            </Badge>
+            {difference !== undefined && (
+                <Badge
+                    variant="outline"
+                    className={cn(
+                        "font-mono",
+                        difference < 0 &&
+                            "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                        difference > 0 &&
+                            "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
+                        difference === 0 && "bg-muted text-muted-foreground"
+                    )}
+                    title="Difference from the original"
+                >
+                    ({difference > 0 ? `+${difference}` : difference} chars)
+                </Badge>
+            )}
+        </div>
+    );
+}
+
 function Reasoning({ children }: { children: string }) {
     return (
         <div className="mt-5 flex gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm leading-6">
@@ -207,6 +239,7 @@ function TitleComparison({ product, contentLanguage }: { product: Product; conte
                         label="Suggested title"
                         language={contentLanguage}
                         value={suggestion.value}
+                        originalValue={product.title}
                         suggested
                     />
                 </div>
@@ -236,6 +269,7 @@ function FeatureComparison({ product, contentLanguage }: { product: Product; con
                         label="Suggested features"
                         language={contentLanguage}
                         values={suggestion.value}
+                        originalValues={product.productFeatures}
                         suggested
                     />
                 </div>
@@ -271,6 +305,7 @@ function DescriptionComparison({
                         label="Suggested description"
                         language={contentLanguage}
                         value={suggestion.value}
+                        originalValue={product.description}
                         suggested
                     />
                 </div>
@@ -284,11 +319,13 @@ function TextPanel({
     label,
     language,
     value,
+    originalValue,
     suggested = false
 }: {
     label: string;
     language: string;
     value: string;
+    originalValue?: string;
     suggested?: boolean;
 }) {
     return (
@@ -298,12 +335,20 @@ function TextPanel({
                 suggested ? "border-primary/30 bg-primary/[0.035]" : "bg-muted/35"
             )}
         >
-            <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant={suggested ? "default" : "secondary"}>
                     {suggested && <Sparkles />}
                     {label} · {language}
                 </Badge>
-                <CopyButton value={value} />
+                <div className="ml-auto flex items-center gap-1">
+                    <CharacterMetrics
+                        count={countCharacters(value)}
+                        originalCount={
+                            originalValue === undefined ? undefined : countCharacters(originalValue)
+                        }
+                    />
+                    <CopyButton value={value} />
+                </div>
             </div>
             <p className="whitespace-pre-line text-sm leading-7">{value || "—"}</p>
         </div>
@@ -314,13 +359,21 @@ function ListPanel({
     label,
     language,
     values,
+    originalValues,
     suggested = false
 }: {
     label: string;
     language: string;
     values: string[];
+    originalValues?: string[];
     suggested?: boolean;
 }) {
+    const characterCount = values.reduce((total, value) => total + countCharacters(value), 0);
+    const originalCharacterCount = originalValues?.reduce(
+        (total, value) => total + countCharacters(value),
+        0
+    );
+
     return (
         <div
             className={cn(
@@ -328,12 +381,15 @@ function ListPanel({
                 suggested ? "border-primary/30 bg-primary/[0.035]" : "bg-muted/35"
             )}
         >
-            <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant={suggested ? "default" : "secondary"}>
                     {suggested && <Sparkles />}
                     {label} · {language}
                 </Badge>
-                <CopyButton value={values.join("\n")} />
+                <div className="ml-auto flex items-center gap-1">
+                    <CharacterMetrics count={characterCount} originalCount={originalCharacterCount} />
+                    <CopyButton value={values.join("\n")} />
+                </div>
             </div>
             <ol className="space-y-3">
                 {values.map((value, index) => (
