@@ -382,14 +382,13 @@ function ListPanel({
                     {suggested && <Sparkles />}
                     {label}
                 </Badge>
-                <div className="ml-auto flex items-center gap-1">
+                <div className="ml-auto">
                     <CharacterMetrics count={characterCount} originalCount={originalCharacterCount} />
-                    <CopyButton value={values.join("\n")} />
                 </div>
             </div>
-            <ol lang={languageTag} className="space-y-3">
+            <ol className="space-y-3">
                 {values.map((value, index) => (
-                    <li key={`${index}-${value}`} className="flex gap-3 text-sm leading-6">
+                    <li key={`${index}-${value}`} className="flex items-start gap-3 text-sm leading-6">
                         <span
                             className={cn(
                                 "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
@@ -400,7 +399,10 @@ function ListPanel({
                         >
                             {index + 1}
                         </span>
-                        <span>{value}</span>
+                        <span lang={languageTag} className="min-w-0 flex-1">
+                            {value}
+                        </span>
+                        <CopyButton value={value} label={`Copy feature ${index + 1}`} />
                     </li>
                 ))}
             </ol>
