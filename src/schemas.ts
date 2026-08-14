@@ -51,8 +51,17 @@ export const inputSchema = z
 
 export const reviewSchema = z.object({
     rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    title: z.string().nullable(),
     comment: z.string()
 });
+
+export const productReviewsSchema = z
+    .object({
+        overallRating: z.number().min(0).max(5),
+        totalCount: z.number().int().nonnegative(),
+        items: z.array(reviewSchema)
+    })
+    .strict();
 
 export const scrapedProductSchema = z.object({
     asin: asinSchema,
@@ -60,7 +69,7 @@ export const scrapedProductSchema = z.object({
     productFeatures: z.array(z.string()),
     description: z.string(),
     productImageUrl: z.string(),
-    reviews: z.array(reviewSchema)
+    reviews: productReviewsSchema
 });
 
 const stringSuggestionSchema = z
@@ -130,9 +139,26 @@ export const storedOutputSchema = z
     .superRefine(rejectDuplicateOutputMarkets);
 export const outputSchema = z.array(marketOutputSchema).superRefine(rejectDuplicateOutputMarkets);
 
+const legacyReviewSchema = reviewSchema.omit({ title: true });
+const legacyStoredProductSchema = scrapedProductSchema.omit({ reviews: true }).extend({
+    reviews: z.array(legacyReviewSchema),
+    suggestions: suggestionsSchema.optional()
+});
+const legacyStoredMarketOutputSchema = z
+    .object({
+        market: marketSchema,
+        products: z.array(legacyStoredProductSchema)
+    })
+    .strict();
+
+export const legacyStoredOutputSchema = z
+    .array(legacyStoredMarketOutputSchema)
+    .superRefine(rejectDuplicateOutputMarkets);
+
 export type Input = z.infer<typeof inputSchema>;
 export type Market = z.infer<typeof marketSchema>;
 export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
+export type ProductReviews = z.infer<typeof productReviewsSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
 export type StoredProduct = z.infer<typeof storedProductSchema>;
 export type StoredOutput = z.infer<typeof storedOutputSchema>;

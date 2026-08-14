@@ -6,6 +6,7 @@ import { suggestProductImprovements } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
 import {
     inputSchema,
+    legacyStoredOutputSchema,
     storedOutputSchema,
     type Input,
     type StoredOutput,
@@ -18,6 +19,15 @@ const DATASET_FILENAME = "Smartbox_2026.json";
 const REPORT_DIRECTORY = path.join(OUTPUT_DIRECTORY, path.parse(DATASET_FILENAME).name);
 const DATA_OUTPUT_PATH = path.join(REPORT_DIRECTORY, "assets/data.json");
 const LEGACY_DATA_OUTPUT_PATH = path.join(OUTPUT_DIRECTORY, DATASET_FILENAME);
+
+type ExistingOutput = {
+    output: StoredOutput;
+    productsNeedingReviewRefresh: Set<string>;
+};
+
+function productKey(market: string, asin: string): string {
+    return `${market}/${asin}`;
+}
 
 function formatZodError(error: ZodError): string {
     return error.issues
@@ -47,16 +57,41 @@ async function readInput(filePath: string): Promise<Input> {
     return result.data;
 }
 
-async function readOutputFile(filePath: string): Promise<StoredOutput | undefined> {
+async function readOutputFile(filePath: string): Promise<ExistingOutput | undefined> {
     try {
         const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
         const result = storedOutputSchema.safeParse(value);
 
-        if (!result.success) {
-            throw new Error(`Existing output is malformed:\n${formatZodError(result.error)}`);
+        if (result.success) {
+            return {
+                output: result.data,
+                productsNeedingReviewRefresh: new Set()
+            };
         }
 
-        return result.data;
+        const legacyResult = legacyStoredOutputSchema.safeParse(value);
+        if (legacyResult.success) {
+            const productsNeedingReviewRefresh = new Set<string>();
+            const output: StoredOutput = legacyResult.data.map(group => ({
+                market: group.market,
+                products: group.products.map(product => {
+                    productsNeedingReviewRefresh.add(productKey(group.market, product.asin));
+
+                    return {
+                        ...product,
+                        reviews: {
+                            overallRating: 0,
+                            totalCount: 0,
+                            items: product.reviews.map(review => ({ ...review, title: null }))
+                        }
+                    };
+                })
+            }));
+
+            return { output, productsNeedingReviewRefresh };
+        }
+
+        throw new Error(`Existing output is malformed:\n${formatZodError(result.error)}`);
     } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") {
             return undefined;
@@ -65,9 +100,13 @@ async function readOutputFile(filePath: string): Promise<StoredOutput | undefine
     }
 }
 
-async function readExistingOutput(): Promise<StoredOutput> {
+async function readExistingOutput(): Promise<ExistingOutput> {
     return (
-        (await readOutputFile(DATA_OUTPUT_PATH)) ?? (await readOutputFile(LEGACY_DATA_OUTPUT_PATH)) ?? []
+        (await readOutputFile(DATA_OUTPUT_PATH)) ??
+        (await readOutputFile(LEGACY_DATA_OUTPUT_PATH)) ?? {
+            output: [],
+            productsNeedingReviewRefresh: new Set()
+        }
     );
 }
 
@@ -77,7 +116,7 @@ async function writeOutput(filePath: string, output: StoredOutput): Promise<void
 }
 
 function hasLegacyReviewNoise(product: StoredProduct): boolean {
-    return product.reviews.some(
+    return product.reviews.items.some(
         review =>
             review.comment.includes("Brief content visible, double tap to read full content.") ||
             review.comment.includes("Full content visible, double tap to read brief content.")
@@ -101,7 +140,8 @@ function reconcileOutput(input: Input, existingOutput: StoredOutput): StoredOutp
 async function processDataset(filename: string): Promise<{ errors: string[]; output: StoredOutput }> {
     const inputPath = path.join(INPUT_DIRECTORY, filename);
     const input = await readInput(inputPath);
-    const output = reconcileOutput(input, await readExistingOutput());
+    const existingOutput = await readExistingOutput();
+    const output = reconcileOutput(input, existingOutput.output);
     const errors: string[] = [];
     const asinCount = input.reduce((count, market) => count + market.asins.length, 0);
 
@@ -114,10 +154,11 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
         for (const [index, asin] of asins.entries()) {
             const existingIndex = marketOutput.products.findIndex(product => product.asin === asin);
             const existingProduct = marketOutput.products[existingIndex];
-            const needsReviewCleanup =
-                existingProduct !== undefined && hasLegacyReviewNoise(existingProduct);
+            const needsReviewRefresh =
+                existingOutput.productsNeedingReviewRefresh.has(productKey(market, asin)) ||
+                (existingProduct !== undefined && hasLegacyReviewNoise(existingProduct));
 
-            if (existingProduct?.suggestions !== undefined && !needsReviewCleanup) {
+            if (existingProduct?.suggestions !== undefined && !needsReviewRefresh) {
                 console.log(`  [${index + 1}/${asins.length}] ${asin}: already complete`);
                 continue;
             }
@@ -125,9 +166,9 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
             try {
                 let scrapedProduct = existingProduct;
 
-                if (scrapedProduct === undefined || needsReviewCleanup) {
-                    const action = needsReviewCleanup
-                        ? "re-parsing product to clean reviews..."
+                if (scrapedProduct === undefined || needsReviewRefresh) {
+                    const action = needsReviewRefresh
+                        ? "re-parsing product to refresh review data..."
                         : "fetching...";
                     console.log(`  [${index + 1}/${asins.length}] ${asin}: ${action}`);
                     scrapedProduct = await fetchProduct(market, asin);
@@ -148,8 +189,8 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
                 await writeOutput(DATA_OUTPUT_PATH, output);
                 console.log(
                     `  [${index + 1}/${asins.length}] ${asin}: saved (${
-                        scrapedProduct.reviews.length
-                    } reviews)`
+                        scrapedProduct.reviews.items.length
+                    } extracted reviews, ${scrapedProduct.reviews.totalCount} total)`
                 );
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);

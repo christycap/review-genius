@@ -95,6 +95,22 @@ function cleanReviewText(value: string): string {
     return cleanText(cleaned);
 }
 
+function parseLocalizedNumber(value: string): number | undefined {
+    const match = cleanText(value).match(/\d+(?:[.,]\d+)?/);
+    if (!match) return undefined;
+
+    const parsed = Number.parseFloat(match[0].replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseLocalizedInteger(value: string): number | undefined {
+    const digits = value.replace(/\D/g, "");
+    if (!digits) return undefined;
+
+    const parsed = Number.parseInt(digits, 10);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
 function looksLikeAmazonPage(html: string): boolean {
     const folded = html.toLowerCase();
     return (
@@ -227,7 +243,26 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
     });
     const excludedCountries = marketplaces[market].excludedCountries;
     const seenReviews = new Set<string>();
-    const reviews: ScrapedProduct["reviews"] = [];
+    const ratingText =
+        $("#acrPopover").first().attr("title") ??
+        cleanText($("#averageCustomerReviews .a-icon-alt").first().text());
+    const countElement = $("#acrCustomerReviewText").first();
+    const countText = countElement.attr("aria-label") ?? cleanText(countElement.text());
+    const overallRating = parseLocalizedNumber(ratingText);
+    const totalCount = parseLocalizedInteger(countText);
+
+    if ((overallRating === undefined) !== (totalCount === undefined)) {
+        throw new AmazonScrapingError(
+            `Could not extract a complete aggregate review summary for ${market}/${asin}`
+        );
+    }
+    if (overallRating !== undefined && (overallRating < 0 || overallRating > 5)) {
+        throw new AmazonScrapingError(
+            `Amazon returned an invalid aggregate rating for ${market}/${asin}: ${overallRating}`
+        );
+    }
+
+    const reviewItems: ScrapedProduct["reviews"]["items"] = [];
 
     $('[data-hook="review"]').each((_, element) => {
         const review = $(element);
@@ -247,6 +282,12 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
             ]
                 .map(selector => cleanReviewText(review.find(selector).first().text()))
                 .find(value => value !== "") ?? "";
+        const modernTitle = cleanReviewText(review.find('[data-hook="reviewTitle"]').first().text());
+        const legacyTitleElement = review.find('[data-hook="review-title"], .review-title').first();
+        const legacyTitle =
+            cleanReviewText(legacyTitleElement.find("span").last().text()) ||
+            cleanReviewText(legacyTitleElement.text());
+        const title = modernTitle || legacyTitle || null;
         const ratingText = cleanText(
             review
                 .find('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')
@@ -261,9 +302,19 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
             return;
         }
 
-        reviews.push({ rating: rating as 1 | 2 | 3 | 4 | 5, comment: body });
+        reviewItems.push({
+            rating: rating as 1 | 2 | 3 | 4 | 5,
+            title,
+            comment: body
+        });
         seenReviews.add(identity);
     });
+
+    const reviews: ScrapedProduct["reviews"] = {
+        overallRating: overallRating ?? 0,
+        totalCount: totalCount ?? 0,
+        items: reviewItems
+    };
 
     return { asin, title, productFeatures, description, productImageUrl, reviews };
 }

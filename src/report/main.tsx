@@ -34,7 +34,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs.j
 import { cn } from "./lib/utils.js";
 
 type Market = "fr" | "it" | "es" | "de" | "be" | "nl";
-type Review = { rating: 1 | 2 | 3 | 4 | 5; comment: string };
+type Review = {
+    rating: 1 | 2 | 3 | 4 | 5;
+    title: string | null;
+    comment: string;
+};
+type ProductReviews = {
+    overallRating: number;
+    totalCount: number;
+    items: Review[];
+};
 type Suggestion<Value> = { value: Value; reasoning: string };
 type Product = {
     asin: string;
@@ -42,7 +51,7 @@ type Product = {
     productFeatures: string[];
     description: string;
     productImageUrl: string;
-    reviews: Review[];
+    reviews: ProductReviews;
     suggestions?: {
         title: Suggestion<string>;
         productFeatures: Suggestion<string[]>;
@@ -86,19 +95,37 @@ function navigate(market: Market, asin: string): void {
 }
 
 function RatingStars({ rating, size = "default" }: { rating: number; size?: "small" | "default" }) {
+    const iconClassName = size === "small" ? "size-3" : "size-4";
+
     return (
         <span className="inline-flex items-center gap-0.5" aria-label={`${rating} étoiles sur 5`}>
-            {Array.from({ length: 5 }, (_, index) => (
-                <Star
-                    key={index}
-                    className={cn(
-                        size === "small" ? "size-3" : "size-4",
-                        index < Math.round(rating)
-                            ? "fill-amber-400 text-amber-400"
-                            : "fill-muted text-muted-foreground/25"
-                    )}
-                />
-            ))}
+            {Array.from({ length: 5 }, (_, index) => {
+                const fill = Math.max(0, Math.min(1, rating - index));
+
+                return (
+                    <span key={index} className={cn("relative shrink-0", iconClassName)}>
+                        <Star
+                            className={cn(
+                                "absolute inset-0 fill-muted text-muted-foreground/25",
+                                iconClassName
+                            )}
+                        />
+                        {fill > 0 && (
+                            <span
+                                className="absolute inset-y-0 left-0 overflow-hidden"
+                                style={{ width: `${fill * 100}%` }}
+                            >
+                                <Star
+                                    className={cn(
+                                        "absolute inset-y-0 left-0 max-w-none fill-amber-400 text-amber-400",
+                                        iconClassName
+                                    )}
+                                />
+                            </span>
+                        )}
+                    </span>
+                );
+            })}
         </span>
     );
 }
@@ -301,59 +328,54 @@ function PendingSuggestions() {
     );
 }
 
-function ReviewsView({ reviews }: { reviews: Review[] }) {
-    const average = reviews.length
-        ? reviews.reduce((total, review) => total + review.rating, 0) / reviews.length
-        : 0;
-    const counts = [5, 4, 3, 2, 1].map(rating => ({
-        rating,
-        count: reviews.filter(review => review.rating === rating).length
-    }));
-
+function ReviewsView({ reviews }: { reviews: ProductReviews }) {
     return (
         <div className="space-y-6">
             <Card>
                 <CardHeader>
                     <CardTitle>Vue d’ensemble des avis</CardTitle>
-                    <CardDescription>Les avis qui ont alimenté les recommandations.</CardDescription>
+                    <CardDescription>
+                        Données agrégées affichées par Amazon. {reviews.items.length} avis ont été
+                        extraits pour alimenter les recommandations.
+                    </CardDescription>
                 </CardHeader>
-                <CardContent className="grid gap-8 md:grid-cols-[220px_1fr]">
-                    <div className="flex flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
-                        <span className="text-5xl font-bold tracking-tight">{average.toFixed(1)}</span>
-                        <RatingStars rating={average} />
-                        <span className="mt-2 text-sm text-muted-foreground">{reviews.length} avis</span>
+                <CardContent className="grid gap-4 sm:grid-cols-2">
+                    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
+                        <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                            Note globale Amazon
+                        </span>
+                        <span className="mt-3 text-5xl font-bold tracking-tight">
+                            {reviews.overallRating.toFixed(1)}
+                            <span className="text-xl text-muted-foreground">/5</span>
+                        </span>
+                        <RatingStars rating={reviews.overallRating} />
                     </div>
-                    <div className="flex flex-col justify-center gap-2.5">
-                        {counts.map(({ rating, count }) => (
-                            <div
-                                key={rating}
-                                className="grid grid-cols-[32px_1fr_28px] items-center gap-3 text-sm"
-                            >
-                                <span>{rating} ★</span>
-                                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                                    <div
-                                        className="h-full rounded-full bg-amber-400"
-                                        style={{
-                                            width: `${
-                                                reviews.length ? (count / reviews.length) * 100 : 0
-                                            }%`
-                                        }}
-                                    />
-                                </div>
-                                <span className="text-right text-muted-foreground">{count}</span>
-                            </div>
-                        ))}
+                    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
+                        <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                            Nombre total d’avis
+                        </span>
+                        <span className="mt-3 text-5xl font-bold tracking-tight">
+                            {reviews.totalCount.toLocaleString()}
+                        </span>
+                        <span className="mt-1 inline-flex items-center gap-2 text-sm text-muted-foreground">
+                            <UsersRound className="size-4" /> avis clients Amazon
+                        </span>
                     </div>
                 </CardContent>
             </Card>
 
             <div className="grid gap-4 lg:grid-cols-2">
-                {reviews.map((review, index) => (
+                {reviews.items.map((review, index) => (
                     <Card key={`${index}-${review.comment}`} className="gap-4 py-5">
                         <CardHeader className="px-5">
-                            <div className="flex items-center justify-between gap-3">
-                                <RatingStars rating={review.rating} />
-                                <Badge variant="outline">{review.rating}/5</Badge>
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <RatingStars rating={review.rating} />
+                                    <Badge variant="outline">{review.rating}/5</Badge>
+                                </div>
+                                {review.title && (
+                                    <CardTitle className="text-base leading-6">{review.title}</CardTitle>
+                                )}
                             </div>
                         </CardHeader>
                         <CardContent className="px-5 text-sm leading-6 text-muted-foreground">
@@ -367,9 +389,6 @@ function ReviewsView({ reviews }: { reviews: Review[] }) {
 }
 
 function ProductHero({ market, product }: { market: Market; product: Product }) {
-    const average = product.reviews.length
-        ? product.reviews.reduce((total, review) => total + review.rating, 0) / product.reviews.length
-        : 0;
     const metadata = marketMetadata[market];
 
     return (
@@ -389,8 +408,9 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                         </Badge>
                         <Badge className="bg-white/10 font-mono text-white">ASIN {product.asin}</Badge>
                         <span className="inline-flex items-center gap-2 text-sm text-white/75">
-                            <RatingStars rating={average} size="small" />
-                            {average.toFixed(1)} · {product.reviews.length} avis
+                            <RatingStars rating={product.reviews.overallRating} size="small" />
+                            {product.reviews.overallRating.toFixed(1)} ·{" "}
+                            {product.reviews.totalCount.toLocaleString()} avis
                         </span>
                     </div>
                     <h1 className="max-w-4xl text-balance text-2xl leading-tight font-bold sm:text-3xl">
@@ -533,7 +553,7 @@ function Header({
     const totalProducts = reportData.reduce((total, item) => total + item.products.length, 0);
     const totalReviews = reportData.reduce(
         (total, item) =>
-            total + item.products.reduce((count, product) => count + product.reviews.length, 0),
+            total + item.products.reduce((count, product) => count + product.reviews.items.length, 0),
         0
     );
 
@@ -654,7 +674,7 @@ function App() {
                                     <Sparkles /> Suggestions
                                 </TabsTrigger>
                                 <TabsTrigger value="reviews">
-                                    <UsersRound /> Avis ({product.reviews.length})
+                                    <UsersRound /> Avis extraits ({product.reviews.items.length})
                                 </TabsTrigger>
                             </TabsList>
                             <TabsContent value="suggestions" className="mt-4 space-y-5">
