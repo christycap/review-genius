@@ -1,5 +1,7 @@
 /node_modules/
 /dist/
+/.cache/
+/output/
 /.eslintrc.js
 /docs/
 /CHANGELOG.md

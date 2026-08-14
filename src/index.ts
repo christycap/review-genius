@@ -3,6 +3,7 @@ import path from "node:path";
 import { ZodError } from "zod";
 import { fetchProduct } from "./amazon.js";
 import { suggestProductImprovements } from "./deepseek.js";
+import { generateReport } from "./report/generate-report.js";
 import {
     inputSchema,
     storedOutputSchema,
@@ -14,6 +15,9 @@ import {
 const INPUT_DIRECTORY = path.resolve("input");
 const OUTPUT_DIRECTORY = path.resolve("output");
 const DATASET_FILENAME = "Smartbox_2026.json";
+const REPORT_DIRECTORY = path.join(OUTPUT_DIRECTORY, path.parse(DATASET_FILENAME).name);
+const DATA_OUTPUT_PATH = path.join(REPORT_DIRECTORY, "assets/data.json");
+const LEGACY_DATA_OUTPUT_PATH = path.join(OUTPUT_DIRECTORY, DATASET_FILENAME);
 
 function formatZodError(error: ZodError): string {
     return error.issues
@@ -43,7 +47,7 @@ async function readInput(filePath: string): Promise<Input> {
     return result.data;
 }
 
-async function readExistingOutput(filePath: string): Promise<StoredOutput> {
+async function readOutputFile(filePath: string): Promise<StoredOutput | undefined> {
     try {
         const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
         const result = storedOutputSchema.safeParse(value);
@@ -55,14 +59,20 @@ async function readExistingOutput(filePath: string): Promise<StoredOutput> {
         return result.data;
     } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-            return [];
+            return undefined;
         }
         throw error;
     }
 }
 
+async function readExistingOutput(): Promise<StoredOutput> {
+    return (
+        (await readOutputFile(DATA_OUTPUT_PATH)) ?? (await readOutputFile(LEGACY_DATA_OUTPUT_PATH)) ?? []
+    );
+}
+
 async function writeOutput(filePath: string, output: StoredOutput): Promise<void> {
-    await mkdir(OUTPUT_DIRECTORY, { recursive: true });
+    await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, `${JSON.stringify(output, null, 4)}\n`);
 }
 
@@ -88,11 +98,10 @@ function reconcileOutput(input: Input, existingOutput: StoredOutput): StoredOutp
     });
 }
 
-async function processDataset(filename: string): Promise<string[]> {
+async function processDataset(filename: string): Promise<{ errors: string[]; output: StoredOutput }> {
     const inputPath = path.join(INPUT_DIRECTORY, filename);
-    const outputPath = path.join(OUTPUT_DIRECTORY, filename);
     const input = await readInput(inputPath);
-    const output = reconcileOutput(input, await readExistingOutput(outputPath));
+    const output = reconcileOutput(input, await readExistingOutput());
     const errors: string[] = [];
     const asinCount = input.reduce((count, market) => count + market.asins.length, 0);
 
@@ -136,7 +145,7 @@ async function processDataset(filename: string): Promise<string[]> {
                     marketOutput.products[existingIndex] = completedProduct;
                 }
 
-                await writeOutput(outputPath, output);
+                await writeOutput(DATA_OUTPUT_PATH, output);
                 console.log(
                     `  [${index + 1}/${asins.length}] ${asin}: saved (${
                         scrapedProduct.reviews.length
@@ -150,12 +159,15 @@ async function processDataset(filename: string): Promise<string[]> {
         }
     }
 
-    await writeOutput(outputPath, output);
-    return errors;
+    await writeOutput(DATA_OUTPUT_PATH, output);
+    return { errors, output };
 }
 
 async function main(): Promise<void> {
-    const errors = await processDataset(DATASET_FILENAME);
+    const { errors, output } = await processDataset(DATASET_FILENAME);
+    console.log("\nGenerating self-contained HTML report...");
+    await generateReport(output, REPORT_DIRECTORY);
+    console.log(`Report generated at ${path.join(REPORT_DIRECTORY, "index.html")}`);
 
     if (errors.length > 0) {
         throw new Error(
