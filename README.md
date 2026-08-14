@@ -80,6 +80,8 @@ The `.env` file is ignored by Git. Never commit or share a real API key.
 
 The build reads [`input/Smartbox_2026.json`](input/Smartbox_2026.json). It must contain one object per market and at least one ASIN per object:
 
+The filename also defines the report title. Its extension is removed and underscores or hyphens become spaces, so `Smartbox_2026.json` is displayed as **Smartbox 2026** in the generated website.
+
 ```ts
 type Market = "fr" | "it" | "es" | "de" | "be" | "nl";
 
@@ -153,31 +155,34 @@ open output/Smartbox_2026/index.html
 The generated `assets/data.json` preserves the deterministic output structure:
 
 ```ts
-type Output = Array<{
-    market: Market;
-    products: Array<{
-        asin: string;
-        title: string;
-        productFeatures: string[];
-        description: string;
-        productImageUrl: string;
-        reviews: {
-            overallRating: number;
-            totalCount: number;
-            items: Array<{
-                rating: 1 | 2 | 3 | 4 | 5;
-                title: string | null;
-                comment: string;
-            }>;
-        };
-        suggestions: {
-            title: { value: string; reasoning: string };
-            productFeatures: { value: string[]; reasoning: string };
-            description: { value: string; reasoning: string };
-        };
-        suggestionPromptVersion: number;
+type Output = {
+    title: string;
+    markets: Array<{
+        market: Market;
+        products: Array<{
+            asin: string;
+            title: string;
+            productFeatures: string[];
+            description: string;
+            productImageUrl: string;
+            reviews: {
+                overallRating: number;
+                totalCount: number;
+                items: Array<{
+                    rating: 1 | 2 | 3 | 4 | 5;
+                    title: string | null;
+                    comment: string;
+                }>;
+            };
+            suggestions: {
+                title: { value: string; reasoning: string };
+                productFeatures: { value: string[]; reasoning: string };
+                description: { value: string; reasoning: string };
+            };
+            suggestionPromptVersion: number;
+        }>;
     }>;
-}>;
+};
 ```
 
 ## The DeepSeek prompt
