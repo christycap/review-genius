@@ -4,8 +4,8 @@ const asinSchema = z
     .string()
     .regex(/^[A-Z0-9]{10}$/, "must be a 10-character Amazon ASIN using A-Z and 0-9");
 
-export const marketSchema = z.enum(["fr", "it", "es"], {
-    error: "must be one of: fr, it, es"
+export const marketSchema = z.enum(["fr", "it", "es", "de", "be", "nl"], {
+    error: "must be one of: fr, it, es, de, be, nl"
 });
 
 const marketInputSchema = z

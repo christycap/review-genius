@@ -33,7 +33,7 @@ import { Separator } from "./components/ui/separator.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs.js";
 import { cn } from "./lib/utils.js";
 
-type Market = "fr" | "it" | "es";
+type Market = "fr" | "it" | "es" | "de" | "be" | "nl";
 type Review = { rating: 1 | 2 | 3 | 4 | 5; comment: string };
 type Suggestion<Value> = { value: Value; reasoning: string };
 type Product = {
@@ -57,7 +57,10 @@ const reportData = __REPORT_DATA__;
 const marketMetadata: Record<Market, { label: string; flag: string; domain: string }> = {
     fr: { label: "France", flag: "🇫🇷", domain: "amazon.fr" },
     it: { label: "Italie", flag: "🇮🇹", domain: "amazon.it" },
-    es: { label: "Espagne", flag: "🇪🇸", domain: "amazon.es" }
+    es: { label: "Espagne", flag: "🇪🇸", domain: "amazon.es" },
+    de: { label: "Allemagne", flag: "🇩🇪", domain: "amazon.de" },
+    be: { label: "Belgique", flag: "🇧🇪", domain: "amazon.com.be" },
+    nl: { label: "Pays-Bas", flag: "🇳🇱", domain: "amazon.nl" }
 };
 
 function getHashSelection(): { market?: Market; asin?: string } {

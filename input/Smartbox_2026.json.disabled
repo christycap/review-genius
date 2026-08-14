@@ -73,5 +73,17 @@
             "B07Z5LKRNS",
             "B07Z9V4BXG"
         ]
+    },
+    {
+        "market": "de",
+        "asins": ["B0CL1RRFJX", "B0CJPL6H32", "B0CJPLB5FQ", "B0CL1L96ZC", "B0CJPL44Y9"]
+    },
+    {
+        "market": "be",
+        "asins": ["B0C4BJGCJ9", "B0C4BKVJP3", "B0C4BJS8QG"]
+    },
+    {
+        "market": "nl",
+        "asins": ["B0875SVBCX", "B0875ZLKGV"]
     }
 ]
