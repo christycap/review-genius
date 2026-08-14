@@ -66,19 +66,14 @@ declare const __REPORT_DATA__: ReportData;
 const reportData = __REPORT_DATA__;
 const marketMetadata: Record<
     Market,
-    { label: string; flag: string; domain: string; contentLanguage: string }
+    { label: string; flag: string; domain: string; languageTag: string }
 > = {
-    fr: { label: "France", flag: "🇫🇷", domain: "amazon.fr", contentLanguage: "French" },
-    it: { label: "Italy", flag: "🇮🇹", domain: "amazon.it", contentLanguage: "Italian" },
-    es: { label: "Spain", flag: "🇪🇸", domain: "amazon.es", contentLanguage: "Spanish" },
-    de: { label: "Germany", flag: "🇩🇪", domain: "amazon.de", contentLanguage: "German" },
-    be: {
-        label: "Belgium",
-        flag: "🇧🇪",
-        domain: "amazon.com.be",
-        contentLanguage: "French / Dutch"
-    },
-    nl: { label: "Netherlands", flag: "🇳🇱", domain: "amazon.nl", contentLanguage: "Dutch" }
+    fr: { label: "France", flag: "🇫🇷", domain: "amazon.fr", languageTag: "fr" },
+    it: { label: "Italy", flag: "🇮🇹", domain: "amazon.it", languageTag: "it" },
+    es: { label: "Spain", flag: "🇪🇸", domain: "amazon.es", languageTag: "es" },
+    de: { label: "Germany", flag: "🇩🇪", domain: "amazon.de", languageTag: "de" },
+    be: { label: "Belgium", flag: "🇧🇪", domain: "amazon.com.be", languageTag: "nl-BE" },
+    nl: { label: "Netherlands", flag: "🇳🇱", domain: "amazon.nl", languageTag: "nl" }
 };
 
 function getHashSelection(): { market?: Market; asin?: string } {
@@ -139,7 +134,7 @@ function RatingStars({ rating, size = "default" }: { rating: number; size?: "sma
     );
 }
 
-function CopyButton({ value }: { value: string }) {
+function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
     const [copied, setCopied] = useState(false);
 
     async function copy(): Promise<void> {
@@ -161,9 +156,9 @@ function CopyButton({ value }: { value: string }) {
     }
 
     return (
-        <Button variant="ghost" size="icon" onClick={() => void copy()} title="Copy">
+        <Button variant="ghost" size="icon" onClick={() => void copy()} title={label}>
             {copied ? <Check className="text-emerald-600" /> : <Clipboard />}
-            <span className="sr-only">Copy</span>
+            <span className="sr-only">{label}</span>
         </Button>
     );
 }
@@ -205,8 +200,10 @@ function Reasoning({ children }: { children: string }) {
         <div className="mt-5 flex gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm leading-6">
             <Lightbulb className="mt-0.5 size-4 shrink-0 text-primary" />
             <div>
-                <p className="mb-1 font-semibold text-primary">Reasoning · English</p>
-                <p className="text-muted-foreground">{children}</p>
+                <p className="mb-1 font-semibold text-primary">Reasoning</p>
+                <p lang="en" className="text-muted-foreground">
+                    {children}
+                </p>
             </div>
         </div>
     );
@@ -223,7 +220,7 @@ function ComparisonHeader({ icon, title }: { icon: React.ReactNode; title: strin
     );
 }
 
-function TitleComparison({ product, contentLanguage }: { product: Product; contentLanguage: string }) {
+function TitleComparison({ product, languageTag }: { product: Product; languageTag: string }) {
     const suggestion = product.suggestions?.title;
     if (!suggestion) return <PendingSuggestions />;
 
@@ -234,10 +231,10 @@ function TitleComparison({ product, contentLanguage }: { product: Product; conte
             </CardHeader>
             <CardContent>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <TextPanel label="Current title" language={contentLanguage} value={product.title} />
+                    <TextPanel label="Current title" languageTag={languageTag} value={product.title} />
                     <TextPanel
                         label="Suggested title"
-                        language={contentLanguage}
+                        languageTag={languageTag}
                         value={suggestion.value}
                         originalValue={product.title}
                         suggested
@@ -249,7 +246,7 @@ function TitleComparison({ product, contentLanguage }: { product: Product; conte
     );
 }
 
-function FeatureComparison({ product, contentLanguage }: { product: Product; contentLanguage: string }) {
+function FeatureComparison({ product, languageTag }: { product: Product; languageTag: string }) {
     const suggestion = product.suggestions?.productFeatures;
     if (!suggestion) return <PendingSuggestions />;
 
@@ -262,12 +259,12 @@ function FeatureComparison({ product, contentLanguage }: { product: Product; con
                 <div className="grid gap-4 lg:grid-cols-2">
                     <ListPanel
                         label="Current features"
-                        language={contentLanguage}
+                        languageTag={languageTag}
                         values={product.productFeatures}
                     />
                     <ListPanel
                         label="Suggested features"
-                        language={contentLanguage}
+                        languageTag={languageTag}
                         values={suggestion.value}
                         originalValues={product.productFeatures}
                         suggested
@@ -279,13 +276,7 @@ function FeatureComparison({ product, contentLanguage }: { product: Product; con
     );
 }
 
-function DescriptionComparison({
-    product,
-    contentLanguage
-}: {
-    product: Product;
-    contentLanguage: string;
-}) {
+function DescriptionComparison({ product, languageTag }: { product: Product; languageTag: string }) {
     const suggestion = product.suggestions?.description;
     if (!suggestion) return <PendingSuggestions />;
 
@@ -298,12 +289,12 @@ function DescriptionComparison({
                 <div className="grid gap-4 lg:grid-cols-2">
                     <TextPanel
                         label="Current description"
-                        language={contentLanguage}
+                        languageTag={languageTag}
                         value={product.description}
                     />
                     <TextPanel
                         label="Suggested description"
-                        language={contentLanguage}
+                        languageTag={languageTag}
                         value={suggestion.value}
                         originalValue={product.description}
                         suggested
@@ -317,13 +308,13 @@ function DescriptionComparison({
 
 function TextPanel({
     label,
-    language,
+    languageTag,
     value,
     originalValue,
     suggested = false
 }: {
     label: string;
-    language: string;
+    languageTag: string;
     value: string;
     originalValue?: string;
     suggested?: boolean;
@@ -338,7 +329,7 @@ function TextPanel({
             <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant={suggested ? "default" : "secondary"}>
                     {suggested && <Sparkles />}
-                    {label} · {language}
+                    {label}
                 </Badge>
                 <div className="ml-auto flex items-center gap-1">
                     <CharacterMetrics
@@ -350,20 +341,22 @@ function TextPanel({
                     <CopyButton value={value} />
                 </div>
             </div>
-            <p className="whitespace-pre-line text-sm leading-7">{value || "—"}</p>
+            <p lang={languageTag} className="whitespace-pre-line text-sm leading-7">
+                {value || "—"}
+            </p>
         </div>
     );
 }
 
 function ListPanel({
     label,
-    language,
+    languageTag,
     values,
     originalValues,
     suggested = false
 }: {
     label: string;
-    language: string;
+    languageTag: string;
     values: string[];
     originalValues?: string[];
     suggested?: boolean;
@@ -384,14 +377,14 @@ function ListPanel({
             <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant={suggested ? "default" : "secondary"}>
                     {suggested && <Sparkles />}
-                    {label} · {language}
+                    {label}
                 </Badge>
                 <div className="ml-auto flex items-center gap-1">
                     <CharacterMetrics count={characterCount} originalCount={originalCharacterCount} />
                     <CopyButton value={values.join("\n")} />
                 </div>
             </div>
-            <ol className="space-y-3">
+            <ol lang={languageTag} className="space-y-3">
                 {values.map((value, index) => (
                     <li key={`${index}-${value}`} className="flex gap-3 text-sm leading-6">
                         <span
@@ -423,13 +416,7 @@ function PendingSuggestions() {
     );
 }
 
-function ReviewsView({
-    reviews,
-    contentLanguage
-}: {
-    reviews: ProductReviews;
-    contentLanguage: string;
-}) {
+function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; languageTag: string }) {
     return (
         <div className="space-y-6">
             <Card>
@@ -473,18 +460,26 @@ function ReviewsView({
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <RatingStars rating={review.rating} />
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <Badge variant="secondary">
-                                            Customer review · {contentLanguage}
-                                        </Badge>
                                         <Badge variant="outline">{review.rating}/5</Badge>
+                                        <CopyButton
+                                            value={[review.title, review.comment]
+                                                .filter((value): value is string => Boolean(value))
+                                                .join("\n\n")}
+                                            label="Copy this review"
+                                        />
                                     </div>
                                 </div>
                                 {review.title && (
-                                    <CardTitle className="text-base leading-6">{review.title}</CardTitle>
+                                    <CardTitle lang={languageTag} className="text-base leading-6">
+                                        {review.title}
+                                    </CardTitle>
                                 )}
                             </div>
                         </CardHeader>
-                        <CardContent className="px-5 text-sm leading-6 text-muted-foreground">
+                        <CardContent
+                            lang={languageTag}
+                            className="px-5 text-sm leading-6 text-muted-foreground"
+                        >
                             “{review.comment}”
                         </CardContent>
                     </Card>
@@ -504,6 +499,7 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                     <img
                         src={product.productImageUrl}
                         alt={product.title}
+                        lang={metadata.languageTag}
                         className="h-52 w-full min-w-0 object-contain"
                     />
                 </div>
@@ -512,9 +508,6 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                         <Badge className="bg-white/15 text-white backdrop-blur-sm">
                             {metadata.flag} {metadata.label}
                         </Badge>
-                        <Badge className="bg-white/15 text-white backdrop-blur-sm">
-                            Original listing · {metadata.contentLanguage}
-                        </Badge>
                         <Badge className="bg-white/10 font-mono text-white">ASIN {product.asin}</Badge>
                         <span className="inline-flex items-center gap-2 text-sm text-white/75">
                             <RatingStars rating={product.reviews.overallRating} size="small" />
@@ -522,7 +515,10 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                             {product.reviews.totalCount.toLocaleString("en")} reviews
                         </span>
                     </div>
-                    <h1 className="max-w-4xl text-balance text-2xl leading-tight font-bold sm:text-3xl">
+                    <h1
+                        lang={metadata.languageTag}
+                        className="max-w-4xl text-balance text-2xl leading-tight font-bold sm:text-3xl"
+                    >
                         {product.title}
                     </h1>
                     <div className="mt-6">
@@ -566,7 +562,7 @@ function ProductNavigation({
         <aside className="hidden h-[calc(100vh-89px)] w-80 shrink-0 flex-col border-r border-border bg-sidebar lg:sticky lg:top-[89px] lg:flex">
             <div className="border-b border-border p-4">
                 <p className="mb-3 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                    Products · {marketMetadata[market].contentLanguage} listing titles
+                    Products
                 </p>
                 <div className="relative">
                     <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -599,7 +595,10 @@ function ProductNavigation({
                             />
                         </span>
                         <span className="min-w-0 flex-1">
-                            <span className="line-clamp-2 text-xs leading-4 font-medium">
+                            <span
+                                lang={marketMetadata[market].languageTag}
+                                className="line-clamp-2 text-xs leading-4 font-medium"
+                            >
                                 {product.title}
                             </span>
                             <span
@@ -633,7 +632,7 @@ function MobileProductSelector({ market, asin }: { market: Market; asin: string 
                 htmlFor="mobile-product"
                 className="mb-2 block text-xs font-semibold text-muted-foreground"
             >
-                Product · {marketMetadata[market].contentLanguage} listing title
+                Product
             </label>
             <select
                 id="mobile-product"
@@ -642,7 +641,11 @@ function MobileProductSelector({ market, asin }: { market: Market; asin: string 
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs"
             >
                 {products.map(product => (
-                    <option key={product.asin} value={product.asin}>
+                    <option
+                        key={product.asin}
+                        value={product.asin}
+                        lang={marketMetadata[market].languageTag}
+                    >
                         {product.asin} — {product.title}
                     </option>
                 ))}
@@ -778,7 +781,7 @@ function App() {
                         <ProductHero market={group.market} product={product} />
 
                         <Tabs defaultValue="suggestions" className="mt-6">
-                            <TabsList className="grid w-full grid-cols-2 sm:w-[390px]">
+                            <TabsList className="grid w-full grid-cols-2 sm:w-[430px]">
                                 <TabsTrigger value="suggestions">
                                     <Sparkles /> Suggestions
                                 </TabsTrigger>
@@ -797,28 +800,27 @@ function App() {
                                         </h2>
                                     </div>
                                     <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                                        Suggestions use the product listing and customer feedback while
-                                        preserving the market language. All reasoning is provided in
-                                        English.
+                                        Suggestions use the product listing and extracted customer
+                                        feedback to create clearer, more persuasive product copy.
                                     </p>
                                 </div>
                                 <TitleComparison
                                     product={product}
-                                    contentLanguage={marketMetadata[group.market].contentLanguage}
+                                    languageTag={marketMetadata[group.market].languageTag}
                                 />
                                 <FeatureComparison
                                     product={product}
-                                    contentLanguage={marketMetadata[group.market].contentLanguage}
+                                    languageTag={marketMetadata[group.market].languageTag}
                                 />
                                 <DescriptionComparison
                                     product={product}
-                                    contentLanguage={marketMetadata[group.market].contentLanguage}
+                                    languageTag={marketMetadata[group.market].languageTag}
                                 />
                             </TabsContent>
                             <TabsContent value="reviews" className="mt-6">
                                 <ReviewsView
                                     reviews={product.reviews}
-                                    contentLanguage={marketMetadata[group.market].contentLanguage}
+                                    languageTag={marketMetadata[group.market].languageTag}
                                 />
                             </TabsContent>
                         </Tabs>

@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "./prompts/product-optimization.js";
 
-export const SUGGESTION_PROMPT_VERSION = 3 as const;
+export const SUGGESTION_PROMPT_VERSION = PRODUCT_OPTIMIZATION_PROMPT_VERSION;
 
 const asinSchema = z
     .string()
