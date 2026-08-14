@@ -33,7 +33,7 @@ flowchart LR
     E --> F[Self-contained HTML report]
 ```
 
-External requests are deliberately serialized and preceded by a random delay of up to 10 seconds to reduce load on Amazon and avoid predictable request bursts. Amazon pages and report assets are cached under `.cache/`, allowing interrupted runs to resume without repeating completed work.
+All external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon fetch is followed by DeepSeek enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Amazon pages and report assets are cached under `.cache/`, allowing interrupted runs to resume without repeating completed work.
 
 ## Report preview
 

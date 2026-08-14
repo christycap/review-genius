@@ -6,7 +6,6 @@ import type { Market, ScrapedProduct } from "./schemas.js";
 
 const CACHE_DIRECTORY = path.resolve(".cache/amazon");
 const MAX_ATTEMPTS = 3;
-const REQUEST_DELAY_MS = 2_000;
 
 const countryNames: Record<Market, string[]> = {
     fr: ["france", "francia", "frankreich"],
@@ -149,8 +148,6 @@ async function fetchHtml(market: Market, asin: string): Promise<string> {
     const url = `https://www.${marketplace.domain}/dp/${asin}`;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-        await delay(REQUEST_DELAY_MS);
-
         try {
             const { response, html } = await runExternalRequest(async () => {
                 const response = await fetch(url, {
