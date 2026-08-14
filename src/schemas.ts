@@ -139,10 +139,25 @@ function rejectDuplicateOutputMarkets(markets: { market: string }[], context: z.
     });
 }
 
-export const storedOutputSchema = z
+export const legacyUnwrappedStoredOutputSchema = z
     .array(storedMarketOutputSchema)
     .superRefine(rejectDuplicateOutputMarkets);
-export const outputSchema = z.array(marketOutputSchema).superRefine(rejectDuplicateOutputMarkets);
+
+const reportTitleSchema = z.string().trim().min(1, "must not be empty");
+
+export const storedOutputSchema = z
+    .object({
+        title: reportTitleSchema,
+        markets: legacyUnwrappedStoredOutputSchema
+    })
+    .strict();
+
+export const outputSchema = z
+    .object({
+        title: reportTitleSchema,
+        markets: z.array(marketOutputSchema).superRefine(rejectDuplicateOutputMarkets)
+    })
+    .strict();
 
 const legacyReviewSchema = reviewSchema.omit({ title: true });
 const legacyStoredProductSchema = scrapedProductSchema.omit({ reviews: true }).extend({

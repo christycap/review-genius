@@ -8,6 +8,7 @@ import {
     SUGGESTION_PROMPT_VERSION,
     inputSchema,
     legacyStoredOutputSchema,
+    legacyUnwrappedStoredOutputSchema,
     storedOutputSchema,
     type Input,
     type StoredOutput,
@@ -17,6 +18,7 @@ import {
 const INPUT_DIRECTORY = path.resolve("input");
 const OUTPUT_DIRECTORY = path.resolve("output");
 const DATASET_FILENAME = "Smartbox_2026.json";
+const DATASET_TITLE = inferReportTitle(DATASET_FILENAME);
 const REPORT_DIRECTORY = path.join(OUTPUT_DIRECTORY, path.parse(DATASET_FILENAME).name);
 const DATA_OUTPUT_PATH = path.join(REPORT_DIRECTORY, "assets/data.json");
 const LEGACY_DATA_OUTPUT_PATH = path.join(OUTPUT_DIRECTORY, DATASET_FILENAME);
@@ -25,6 +27,16 @@ type ExistingOutput = {
     output: StoredOutput;
     productsNeedingReviewRefresh: Set<string>;
 };
+
+function inferReportTitle(filename: string): string {
+    const title = path.parse(filename).name.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+
+    if (title.length === 0) {
+        throw new Error(`Could not infer a report title from dataset filename: ${filename}`);
+    }
+
+    return title;
+}
 
 function productKey(market: string, asin: string): string {
     return `${market}/${asin}`;
@@ -70,24 +82,38 @@ async function readOutputFile(filePath: string): Promise<ExistingOutput | undefi
             };
         }
 
+        const unwrappedResult = legacyUnwrappedStoredOutputSchema.safeParse(value);
+        if (unwrappedResult.success) {
+            return {
+                output: {
+                    title: DATASET_TITLE,
+                    markets: unwrappedResult.data
+                },
+                productsNeedingReviewRefresh: new Set()
+            };
+        }
+
         const legacyResult = legacyStoredOutputSchema.safeParse(value);
         if (legacyResult.success) {
             const productsNeedingReviewRefresh = new Set<string>();
-            const output: StoredOutput = legacyResult.data.map(group => ({
-                market: group.market,
-                products: group.products.map(product => {
-                    productsNeedingReviewRefresh.add(productKey(group.market, product.asin));
+            const output: StoredOutput = {
+                title: DATASET_TITLE,
+                markets: legacyResult.data.map(group => ({
+                    market: group.market,
+                    products: group.products.map(product => {
+                        productsNeedingReviewRefresh.add(productKey(group.market, product.asin));
 
-                    return {
-                        ...product,
-                        reviews: {
-                            overallRating: 0,
-                            totalCount: 0,
-                            items: product.reviews.map(review => ({ ...review, title: null }))
-                        }
-                    };
-                })
-            }));
+                        return {
+                            ...product,
+                            reviews: {
+                                overallRating: 0,
+                                totalCount: 0,
+                                items: product.reviews.map(review => ({ ...review, title: null }))
+                            }
+                        };
+                    })
+                }))
+            };
 
             return { output, productsNeedingReviewRefresh };
         }
@@ -105,7 +131,7 @@ async function readExistingOutput(): Promise<ExistingOutput> {
     return (
         (await readOutputFile(DATA_OUTPUT_PATH)) ??
         (await readOutputFile(LEGACY_DATA_OUTPUT_PATH)) ?? {
-            output: [],
+            output: { title: DATASET_TITLE, markets: [] },
             productsNeedingReviewRefresh: new Set()
         }
     );
@@ -125,17 +151,20 @@ function hasLegacyReviewNoise(product: StoredProduct): boolean {
 }
 
 function reconcileOutput(input: Input, existingOutput: StoredOutput): StoredOutput {
-    return input.map(({ market, asins }) => {
-        const existingMarket = existingOutput.find(output => output.market === market);
+    return {
+        title: DATASET_TITLE,
+        markets: input.map(({ market, asins }) => {
+            const existingMarket = existingOutput.markets.find(output => output.market === market);
 
-        return {
-            market,
-            products: asins.flatMap(asin => {
-                const product = existingMarket?.products.find(product => product.asin === asin);
-                return product === undefined ? [] : [product];
-            })
-        };
-    });
+            return {
+                market,
+                products: asins.flatMap(asin => {
+                    const product = existingMarket?.products.find(product => product.asin === asin);
+                    return product === undefined ? [] : [product];
+                })
+            };
+        })
+    };
 }
 
 async function processDataset(filename: string): Promise<{ errors: string[]; output: StoredOutput }> {
@@ -149,7 +178,7 @@ async function processDataset(filename: string): Promise<{ errors: string[]; out
     console.log(`${filename}: ${input.length} market(s), ${asinCount} ASIN(s)`);
 
     for (const [marketIndex, { market, asins }] of input.entries()) {
-        const marketOutput = output[marketIndex];
+        const marketOutput = output.markets[marketIndex];
         console.log(`\n${market}: ${asins.length} ASIN(s)`);
 
         for (const [index, asin] of asins.entries()) {

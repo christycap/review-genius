@@ -131,59 +131,15 @@ npm run build
 
 The command validates the input, resumes any completed work, fetches missing Amazon data, requests missing or outdated DeepSeek suggestions, downloads report assets, and generates the website.
 
-The main output is:
-
-```text
-output/Smartbox_2026/
-├── index.html
-└── assets/
-    ├── app.css
-    ├── app.js
-    ├── data.json
-    ├── numberly-logo.svg
-    └── product-images/
-```
-
 Open [`output/Smartbox_2026/index.html`](output/Smartbox_2026/index.html) directly in a browser. No web server or internet connection is required to browse a completed report.
 
-On macOS, for example:
+On macOS, for example (or double click on the index.html):
 
 ```bash
 open output/Smartbox_2026/index.html
 ```
 
-The generated `assets/data.json` preserves the deterministic output structure:
-
-```ts
-type Output = {
-    title: string;
-    markets: Array<{
-        market: Market;
-        products: Array<{
-            asin: string;
-            title: string;
-            productFeatures: string[];
-            description: string;
-            productImageUrl: string;
-            reviews: {
-                overallRating: number;
-                totalCount: number;
-                items: Array<{
-                    rating: 1 | 2 | 3 | 4 | 5;
-                    title: string | null;
-                    comment: string;
-                }>;
-            };
-            suggestions: {
-                title: { value: string; reasoning: string };
-                productFeatures: { value: string[]; reasoning: string };
-                description: { value: string; reasoning: string };
-            };
-            suggestionPromptVersion: number;
-        }>;
-    }>;
-};
-```
+The generated `assets/data.json` preserves the deterministic output structure.
 
 ## The DeepSeek prompt
 
@@ -202,43 +158,3 @@ The prompt is designed around several principles:
 DeepSeek runs in high-effort thinking mode and returns strict JSON. Deterministic validation rejects malformed responses, unchanged fields, titles over the current limit, invalid feature counts, and complacent reasoning. Failed validations are retried before anything is saved.
 
 Changing the prompt version invalidates only cached AI suggestions. Previously scraped Amazon data remains reusable, so a prompt iteration does not require re-requesting every product page.
-
-## Accessibility and localization
-
-The report interface is English and the document root uses `lang="en"`. Product titles, features, descriptions, and customer reviews are wrapped in market-specific BCP 47 language attributes so assistive technology can switch pronunciation correctly without adding visible language labels to the interface.
-
-## Useful commands
-
-| Command                | Purpose                                            |
-| ---------------------- | -------------------------------------------------- |
-| `npm run build`        | Process the input and generate the complete report |
-| `npm run format`       | Format TypeScript, TSX, JSON, and Markdown files   |
-| `npm run format:check` | Verify formatting without changing files           |
-| `npx tsc --noEmit`     | Run the TypeScript type checker                    |
-
-## Project structure
-
-```text
-assets/                         README logo and screenshots
-input/                          Enabled and full ASIN datasets
-sample/                         Source spreadsheets and samples
-src/
-├── amazon.ts                   Serialized Amazon fetch and parser
-├── deepseek.ts                 DeepSeek client and response validation
-├── external-request.ts         Global external-request mutex
-├── index.ts                    Resumable processing pipeline
-├── prompts/
-│   └── product-optimization.ts Versioned conversion prompt
-├── report/                     React/Tailwind/Shadcn-style static report
-└── schemas.ts                  Runtime schemas and TypeScript types
-output/Smartbox_2026/           Generated self-contained website
-.cache/                         Cached pages, images, and temporary files
-```
-
-## Operational notes
-
--   Start with a small enabled input before processing the full `.disabled` dataset.
--   Requests are sequential by design; do not parallelize the Amazon or DeepSeek loops.
--   A high aggregate rating does not mean a listing is already optimized.
--   Extracted reviews are qualitative context, not a statistically complete review corpus.
--   AI suggestions should be reviewed by a person before publishing. Conversion impact can only be confirmed with marketplace performance data or controlled testing.

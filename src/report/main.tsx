@@ -59,11 +59,14 @@ type Product = {
         description: Suggestion<string>;
     };
 };
-type ReportData = { market: Market; products: Product[] }[];
+type ReportData = {
+    title: string;
+    markets: { market: Market; products: Product[] }[];
+};
 
 declare const __REPORT_DATA__: ReportData;
 
-const reportData = __REPORT_DATA__;
+const { title: reportTitle, markets: reportData } = __REPORT_DATA__;
 const marketMetadata: Record<
     Market,
     { label: string; flag: string; domain: string; languageTag: string }
@@ -684,8 +687,12 @@ function Header({
                     <Separator orientation="vertical" className="hidden h-8 sm:block" />
                     <div>
                         <p className="text-sm font-bold tracking-tight sm:text-lg">Review Genius 2.0</p>
-                        <p className="hidden text-xs text-muted-foreground sm:block">
-                            {totalProducts} products · {totalReviews} extracted reviews analyzed
+                        <p className="text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground/80">{reportTitle}</span>
+                            <span className="hidden sm:inline">
+                                {" "}
+                                · {totalProducts} products · {totalReviews} extracted reviews analyzed
+                            </span>
                         </p>
                     </div>
                 </div>
@@ -826,7 +833,7 @@ function App() {
                         </Tabs>
 
                         <footer className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t py-6 text-xs text-muted-foreground">
-                            <span>Review Genius 2.0 · Smartbox 2026 report</span>
+                            <span>Review Genius 2.0 · {reportTitle} report</span>
                             <span className="inline-flex items-center gap-1">
                                 Self-contained local report <ArrowRight className="size-3" />{" "}
                                 {marketMetadata[group.market].label}

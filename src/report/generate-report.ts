@@ -12,14 +12,19 @@ const REPORT_CACHE_DIRECTORY = path.resolve(".cache/report");
 const CACHED_LOGO_PATH = path.join(REPORT_CACHE_DIRECTORY, "numberly-logo.svg");
 const CACHED_PRODUCT_IMAGES_DIRECTORY = path.join(REPORT_CACHE_DIRECTORY, "product-images");
 
-const INDEX_HTML = `<!doctype html>
+function escapeHtmlText(value: string): string {
+    return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function createIndexHtml(reportTitle: string): string {
+    return `<!doctype html>
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="color-scheme" content="light dark" />
         <meta name="theme-color" content="#008099" />
-        <title>Review Genius 2.0 · Smartbox 2026</title>
+        <title>Review Genius 2.0 · ${escapeHtmlText(reportTitle)}</title>
         <script>
             try {
                 const savedTheme = localStorage.getItem("review-genius-theme");
@@ -36,6 +41,7 @@ const INDEX_HTML = `<!doctype html>
     </body>
 </html>
 `;
+}
 
 async function ensureLogoIsCached(): Promise<void> {
     try {
@@ -79,7 +85,7 @@ async function createLocalReportData(
 ): Promise<StoredOutput> {
     const localData = structuredClone(data);
 
-    for (const group of localData) {
+    for (const group of localData.markets) {
         for (const product of group.products) {
             const relativeImagePath = `product-images/${group.market}/${product.asin}.jpg`;
             const cachedImagePath = path.join(
@@ -133,7 +139,7 @@ export async function generateReport(data: StoredOutput, reportDirectory: string
     const localReportData = await createLocalReportData(data, assetsDirectory);
 
     await Promise.all([
-        writeFile(path.join(reportDirectory, "index.html"), INDEX_HTML),
+        writeFile(path.join(reportDirectory, "index.html"), createIndexHtml(data.title)),
         writeFile(path.join(assetsDirectory, "data.json"), `${JSON.stringify(data, null, 4)}\n`),
         copyFile(CACHED_LOGO_PATH, path.join(assetsDirectory, "numberly-logo.svg")),
         build({
