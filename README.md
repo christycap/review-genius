@@ -5,7 +5,7 @@
 <h1 align="center">Review Genius 2.0</h1>
 
 <p align="center">
-  Turn Amazon listings and customer reviews into conversion-focused copy recommendations and a self-contained, navigable report.
+  Turn Amazon listings and customer reviews into copy recommendations designed around official Amazon guidance and conversion best practices, delivered in a self-contained, navigable report.
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 ## What it does
 
-Review Genius processes a list of Amazon ASINs grouped by market and produces an interactive report for reviewing the original listing alongside AI-generated improvements.
+Review Genius processes a list of Amazon ASINs grouped by market and produces an interactive report for reviewing the original listing alongside optimized suggestions. Its DeepSeek prompt applies official Amazon listing guidance and ecommerce usability research to improve each title, feature set, and description for marketplace alignment, clarity, discoverability, and conversion.
 
 For each product, the tool:
 
