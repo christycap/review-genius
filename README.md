@@ -163,11 +163,12 @@ The prompt is designed around several principles:
 
 -   **Conversion, not congratulations.** The selected model must materially improve every field and may not return an unchanged listing or claim that no work is needed.
 -   **Four shopper decisions.** Copy is organized around recognition, relevance, confidence, and desire.
--   **Amazon-aware structure.** Titles are constrained to 75 characters, while secondary decision details move into three to five scannable feature bullets.
+-   **Search intent before arbitrary brevity.** Titles respect Amazon's general 200-character limit. A compact title remains preferable, but source-supported product, occasion, recipient, and long-tail search phrases are retained when their discovery value outweighs a soft display-length preference.
+-   **One coordinated listing.** The title, feature list, and description are planned together. Important information moved out of one field must remain in the most useful destination, and each rationale identifies meaningful cross-field moves.
 -   **Reviews as prioritization signals.** Review titles and comments help surface customer vocabulary, valued benefits, uncertainties, and objections. They are never treated as verified product facts.
 -   **No invented claims.** Suggested benefits must follow conservatively from facts already present in the listing.
 -   **Language separation.** Suggested listing copy remains in the source market language; concise editorial reasoning is returned in English.
--   **Auditable output.** Each rationale names the concrete changes and the expected improvement to discoverability, comprehension, confidence, or conversion.
+-   **Auditable output.** Each rationale explains its field in the context of the complete proposal, names concrete changes or information movements, and states the expected improvement to discoverability, comprehension, confidence, or conversion.
 
 DeepSeek runs in high-effort thinking mode, while Gemini uses its native structured-output format. Both providers pass through the same deterministic validation, which rejects malformed responses, unchanged fields, titles over the current limit, invalid feature counts, and complacent reasoning. Failed validations are retried before anything is saved.
 
