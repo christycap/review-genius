@@ -11,7 +11,15 @@ export type SuggestionService = {
     provider: SuggestionProvider;
     providerName: "DeepSeek" | "Gemini";
     model: string;
+    reportConfig: ReportAiConfig;
     suggest: (market: Market, product: ScrapedProduct) => Promise<ProductSuggestions>;
+};
+
+export type ReportAiConfig = {
+    provider: SuggestionProvider;
+    providerName: "DeepSeek" | "Gemini";
+    model: string;
+    apiKey: string;
 };
 
 function readValue(environment: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -32,10 +40,18 @@ export function createSuggestionService(
     }
 
     if (deepSeekApiKey) {
-        return {
+        const reportConfig: ReportAiConfig = {
             provider: "deepseek",
             providerName: "DeepSeek",
             model: DEEPSEEK_MODEL,
+            apiKey: deepSeekApiKey
+        };
+
+        return {
+            provider: reportConfig.provider,
+            providerName: reportConfig.providerName,
+            model: reportConfig.model,
+            reportConfig,
             suggest: (market, product) =>
                 suggestProductImprovementsWithDeepSeek(deepSeekApiKey, market, product)
         };
@@ -54,10 +70,18 @@ export function createSuggestionService(
             throw new Error(`GEMINI_MODEL contains unsupported characters: ${rawModel}`);
         }
 
-        return {
+        const reportConfig: ReportAiConfig = {
             provider: "gemini",
             providerName: "Gemini",
             model,
+            apiKey: geminiApiKey
+        };
+
+        return {
+            provider: reportConfig.provider,
+            providerName: reportConfig.providerName,
+            model: reportConfig.model,
+            reportConfig,
             suggest: (market, product) =>
                 suggestProductImprovementsWithGemini(geminiApiKey, model, market, product)
         };

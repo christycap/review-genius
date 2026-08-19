@@ -23,6 +23,7 @@ For each product, the tool:
 3. Sends the complete product and review context to the configured AI provider: DeepSeek or Gemini.
 4. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
 5. Builds a self-contained React report with market/product navigation, comparisons, character counts, copy controls, review context, and light/dark themes.
+6. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback.
 
 ```mermaid
 flowchart LR
@@ -31,9 +32,11 @@ flowchart LR
     C --> D[Serialized AI enrichment]
     D --> E[Validated JSON output]
     E --> F[Self-contained HTML report]
+    F --> G[Optional browser feedback refinement]
+    G --> F
 ```
 
-All external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon fetch is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Amazon pages and report assets are cached under `.cache/`, allowing interrupted runs to resume without repeating completed work.
+All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon fetch is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Amazon pages and report assets are cached under `.cache/`, allowing interrupted runs to resume without repeating completed work.
 
 ## Report preview
 
@@ -88,7 +91,7 @@ GEMINI_MODEL=gemini-3.7-flash
 
 The build stops before processing if both keys are set, neither key is set, or Gemini is selected without `GEMINI_MODEL`.
 
-The `.env` file is ignored by Git. Never commit or share a real API key.
+The `.env` file is ignored by Git. Never commit it. The selected provider key is deliberately embedded in the generated report's JavaScript so the local browser can regenerate suggestions without a server. Share a generated report archive only with collaborators who are allowed to use that key.
 
 ## Input format
 
@@ -145,7 +148,7 @@ npm run build
 
 The command validates the input, resumes any completed work, fetches missing Amazon data, requests missing or outdated AI suggestions, downloads report assets, and generates the website.
 
-Open [`output/Smartbox_2026/index.html`](output/Smartbox_2026/index.html) directly in a browser. No web server or internet connection is required to browse a completed report.
+Open [`output/Smartbox_2026/index.html`](output/Smartbox_2026/index.html) directly in a browser. No web server or internet connection is required to browse a completed report; an internet connection is required only when regenerating suggestions.
 
 On macOS, for example (or double click on the index.html):
 
@@ -154,6 +157,12 @@ open output/Smartbox_2026/index.html
 ```
 
 The generated `assets/data.json` preserves the deterministic output structure.
+
+### Refine a suggestion in the report
+
+For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, reviews, current suggestions, and additional feedback to the provider and model selected during the build. The same system prompt, structured response format, and deterministic validation are reused.
+
+The refined title, features, description, and English rationales replace the displayed proposal. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `assets/data.json` inside the archive.
 
 ## The optimization prompt
 

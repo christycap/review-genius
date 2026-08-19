@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { build } from "esbuild";
+import type { ReportAiConfig } from "../ai.js";
 import { runExternalRequest } from "../external-request.js";
 import type { StoredOutput } from "../schemas.js";
 
@@ -163,7 +164,11 @@ async function createLocalReportData(
     return localData;
 }
 
-export async function generateReport(data: StoredOutput, reportDirectory: string): Promise<void> {
+export async function generateReport(
+    data: StoredOutput,
+    reportDirectory: string,
+    aiConfig: ReportAiConfig
+): Promise<void> {
     const assetsDirectory = path.join(reportDirectory, "assets");
     await mkdir(assetsDirectory, { recursive: true });
     await ensureLogoIsCached();
@@ -186,7 +191,8 @@ export async function generateReport(data: StoredOutput, reportDirectory: string
             format: "iife",
             target: ["es2022"],
             define: {
-                __REPORT_DATA__: JSON.stringify(localReportData)
+                __REPORT_DATA__: JSON.stringify(localReportData),
+                __REPORT_AI_CONFIG__: JSON.stringify(aiConfig)
             }
         }),
         executeFile(

@@ -83,6 +83,31 @@ export function createProductOptimizationUserPrompt(
     })}`;
 }
 
+export function createProductRefinementUserPrompt(
+    market: string,
+    product: ProductOptimizationContext,
+    currentSuggestions: unknown,
+    additionalFeedback: string
+): string {
+    return `Regenerate the complete product-listing suggestion using the collaborator's additional feedback and return the requested JSON object.
+
+Treat the feedback as authoritative editorial direction about priorities, wording, and search intent, but not as evidence of new product facts. Follow it unless it conflicts with the system rules or the supplied product facts. Reconsider the title, feature list, and description together; return all three fields and update each English rationale so it explains how the feedback affected the coordinated proposal.
+
+At least one suggested listing value must materially change from the current suggestions to reflect the additional feedback. Do not return the current proposal unchanged.
+
+${JSON.stringify({
+    market,
+    originalListing: {
+        title: product.title,
+        productFeatures: product.productFeatures,
+        description: product.description,
+        reviews: product.reviews
+    },
+    currentSuggestions,
+    additionalFeedback
+})}`;
+}
+
 /**
  * Editorial framework reviewed on 2026-08-14 and distilled from:
  *

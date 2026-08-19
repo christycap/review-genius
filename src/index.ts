@@ -270,7 +270,7 @@ async function main(): Promise<void> {
     const suggestionService = createSuggestionService();
     const { errors, output } = await processDataset(DATASET_FILENAME, suggestionService);
     console.log("\nGenerating self-contained HTML report...");
-    await generateReport(output, REPORT_DIRECTORY);
+    await generateReport(output, REPORT_DIRECTORY, suggestionService.reportConfig);
     console.log(`Report generated at ${path.join(REPORT_DIRECTORY, "index.html")}`);
 
     if (errors.length > 0) {
