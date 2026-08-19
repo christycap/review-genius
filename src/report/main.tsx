@@ -620,14 +620,27 @@ function PendingSuggestions() {
 }
 
 function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; languageTag: string }) {
+    const criticalCoverage = reviews.items.filter(
+        review => review.selectionReason === "critical"
+    ).length;
+    const collectedAt = reviews.collection.collectedAt
+        ? new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(
+              new Date(reviews.collection.collectedAt)
+          )
+        : undefined;
+
     return (
         <div className="space-y-6">
             <Card>
                 <CardHeader>
                     <CardTitle>Review overview</CardTitle>
                     <CardDescription>
-                        Aggregate data shown by Amazon. {reviews.items.length} reviews were extracted to
-                        inform the recommendations.
+                        Aggregate data shown by Amazon. The AI corpus contains {reviews.items.length}{" "}
+                        recent-first reviews
+                        {criticalCoverage > 0
+                            ? `, including ${criticalCoverage} added for 1–3-star concern coverage`
+                            : ""}
+                        .
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -657,13 +670,19 @@ function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; langua
 
             <div className="grid gap-4 lg:grid-cols-2">
                 {reviews.items.map((review, index) => (
-                    <Card key={`${index}-${review.comment}`} className="gap-4 py-5">
+                    <Card key={review.id ?? `${index}-${review.comment}`} className="gap-4 py-5">
                         <CardHeader className="px-5">
                             <div className="space-y-3">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <RatingStars rating={review.rating} />
                                     <div className="flex flex-wrap items-center gap-2">
                                         <Badge variant="outline">{review.rating}/5</Badge>
+                                        {review.selectionReason === "critical" && (
+                                            <Badge variant="secondary">Concern coverage</Badge>
+                                        )}
+                                        {review.verifiedPurchase && (
+                                            <Badge variant="secondary">Verified purchase</Badge>
+                                        )}
                                         <CopyButton
                                             value={[review.title, review.comment]
                                                 .filter((value): value is string => Boolean(value))
@@ -673,14 +692,26 @@ function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; langua
                                     </div>
                                 </div>
                                 {review.title && (
-                                    <CardTitle lang={languageTag} className="text-base leading-6">
+                                    <CardTitle
+                                        lang={review.sourceLanguage ?? languageTag}
+                                        className="text-base leading-6"
+                                    >
                                         {review.title}
                                     </CardTitle>
+                                )}
+                                {(review.dateText || review.variant) && (
+                                    <div
+                                        lang={review.sourceLanguage ?? languageTag}
+                                        className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                                    >
+                                        {review.dateText && <span>{review.dateText}</span>}
+                                        {review.variant && <span>{review.variant}</span>}
+                                    </div>
                                 )}
                             </div>
                         </CardHeader>
                         <CardContent
-                            lang={languageTag}
+                            lang={review.sourceLanguage ?? languageTag}
                             className="px-5 text-sm leading-6 text-muted-foreground"
                         >
                             “{review.comment}”
@@ -688,6 +719,12 @@ function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; langua
                     </Card>
                 ))}
             </div>
+
+            <p className="text-center text-xs text-muted-foreground">
+                Review corpus collected with the recent-balanced strategy
+                {collectedAt ? ` on ${collectedAt}` : ""}; aggregate totals remain Amazon's full-listing
+                figures.
+            </p>
         </div>
     );
 }

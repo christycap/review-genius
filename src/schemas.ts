@@ -52,17 +52,59 @@ export const inputSchema = z
         });
     });
 
-export const reviewSchema = z.object({
-    rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
-    title: z.string().nullable(),
-    comment: z.string()
-});
+export const reviewSelectionReasonSchema = z.enum(["embedded-top", "recent", "critical"]);
+
+export const reviewSchema = z
+    .object({
+        id: z.string().min(1).nullable().default(null),
+        rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+        title: z.string().nullable(),
+        comment: z.string(),
+        date: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .nullable()
+            .default(null),
+        dateText: z.string().default(""),
+        verifiedPurchase: z.boolean().default(false),
+        reviewedAsin: asinSchema.nullable().default(null),
+        variant: z.string().nullable().default(null),
+        sourceLanguage: z.string().min(1).nullable().default(null),
+        selectionReason: reviewSelectionReasonSchema.default("embedded-top")
+    })
+    .strict();
+
+export const reviewCollectionSchema = z
+    .object({
+        strategy: z.enum(["embedded-top", "recent", "recent-balanced"]),
+        limit: z.number().int().min(1).max(30),
+        collectedAt: z.string().datetime().nullable(),
+        pagesVisited: z.number().int().nonnegative(),
+        complete: z.boolean(),
+        scraperVersion: z.number().int().positive(),
+        corpusHash: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .nullable()
+    })
+    .strict();
+
+const legacyReviewCollection = {
+    strategy: "embedded-top" as const,
+    limit: 30,
+    collectedAt: null,
+    pagesVisited: 0,
+    complete: false,
+    scraperVersion: 1,
+    corpusHash: null
+};
 
 export const productReviewsSchema = z
     .object({
         overallRating: z.number().min(0).max(5),
         totalCount: z.number().int().nonnegative(),
-        items: z.array(reviewSchema)
+        items: z.array(reviewSchema).max(30),
+        collection: reviewCollectionSchema.default(legacyReviewCollection)
     })
     .strict();
 
@@ -188,6 +230,7 @@ export type Input = z.infer<typeof inputSchema>;
 export type Market = z.infer<typeof marketSchema>;
 export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
 export type ProductReviews = z.infer<typeof productReviewsSchema>;
+export type Review = z.infer<typeof reviewSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
 export type SuggestionProvider = z.infer<typeof suggestionProviderSchema>;
 export type StoredProduct = z.infer<typeof storedProductSchema>;

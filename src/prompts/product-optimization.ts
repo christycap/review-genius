@@ -2,7 +2,7 @@
  * Prompt version is persisted with every product so prompt changes invalidate
  * cached suggestions without forcing Amazon product data to be fetched again.
  */
-export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 4 as const;
+export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 5 as const;
 export const AMAZON_TITLE_CHARACTER_LIMIT = 200;
 
 export const PRODUCT_SUGGESTIONS_JSON_SCHEMA = {
@@ -145,7 +145,8 @@ Return only a JSON object with exactly this shape:
 Rules:
 - Output language is field-specific: write the title, feature bullets, and description in the source listing language; write all three reasoning fields in English.
 - Use only facts present in the title, product features, or description. A benefit is allowed only when it follows directly and conservatively from an explicit product fact. Never invent specifications, quantities, certifications, rankings, guarantees, availability, prices, inclusions, locations, or outcomes.
-- Treat the aggregate rating and total count as context, not proof that the listing copy is effective. Extracted reviews are a small qualitative sample: use recurring themes to prioritize factual benefits, vocabulary, questions, and objections, but never present a reviewer's subjective claim as a product fact. Do not quote or closely copy review text.
+- Treat the aggregate rating and total count as context, not proof that the listing copy is effective. The extracted corpus contains up to 30 reviews: it prioritizes the newest available reviews and deliberately enriches the sample with recent 1–3-star reviews so objections are not hidden by Amazon's top-review selection. This is a qualitative decision-making corpus, not a representative rating distribution; never infer prevalence from the number of positive or negative extracted items.
+- Use repeated review themes, titles, dates, verified-purchase markers, and variant context cautiously to prioritize source-supported benefits, customer vocabulary, questions, and objections. Positive signals can reveal facts that deserve prominence; negative signals can reveal uncertainty that the listing should clarify. Never turn a reviewer's subjective statement or unverified detail into a product fact, and do not quote or closely copy review text.
 
 Conversion framework distilled from current Amazon guidance and ecommerce usability research:
 - Optimize for four shopper decisions: recognition (what is it?), relevance (is it for me?), confidence (what exactly do I get and how does it work?), and desire (why is this experience worth choosing?).

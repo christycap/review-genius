@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
 import { createSuggestionService, type SuggestionService } from "./ai.js";
+import { closeAmazonBrowser } from "./amazon-browser.js";
+import { isReviewCollectionCurrent } from "./amazon-reviews.js";
 import { fetchProduct } from "./amazon.js";
 import { DEEPSEEK_MODEL } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
@@ -109,7 +111,16 @@ async function readOutputFile(filePath: string): Promise<ExistingOutput | undefi
                             reviews: {
                                 overallRating: 0,
                                 totalCount: 0,
-                                items: product.reviews.map(review => ({ ...review, title: null }))
+                                items: product.reviews.map(review => ({ ...review, title: null })),
+                                collection: {
+                                    strategy: "embedded-top",
+                                    limit: 30,
+                                    collectedAt: null,
+                                    pagesVisited: 0,
+                                    complete: false,
+                                    scraperVersion: 1,
+                                    corpusHash: null
+                                }
                             }
                         };
                     })
@@ -206,7 +217,9 @@ async function processDataset(
             const existingProduct = marketOutput.products[existingIndex];
             const needsReviewRefresh =
                 existingOutput.productsNeedingReviewRefresh.has(productKey(market, asin)) ||
-                (existingProduct !== undefined && hasLegacyReviewNoise(existingProduct));
+                (existingProduct !== undefined &&
+                    (hasLegacyReviewNoise(existingProduct) ||
+                        !isReviewCollectionCurrent(existingProduct.reviews)));
 
             if (
                 existingProduct !== undefined &&
@@ -232,8 +245,22 @@ async function processDataset(
                     console.log(`  [${index + 1}/${asins.length}] ${asin}: using existing product data`);
                 }
 
-                console.log(`    Requesting ${suggestionService.providerName} suggestions...`);
-                const suggestions = await suggestionService.suggest(market, scrapedProduct);
+                const canReuseSuggestions =
+                    existingProduct !== undefined &&
+                    hasCurrentSuggestions(existingProduct, suggestionService) &&
+                    existingProduct.reviews.collection.corpusHash !== null &&
+                    existingProduct.reviews.collection.corpusHash ===
+                        scrapedProduct.reviews.collection.corpusHash;
+                const suggestions = canReuseSuggestions
+                    ? existingProduct.suggestions!
+                    : await (async () => {
+                          console.log(`    Requesting ${suggestionService.providerName} suggestions...`);
+                          return suggestionService.suggest(market, scrapedProduct);
+                      })();
+
+                if (canReuseSuggestions) {
+                    console.log("    Review corpus is unchanged; keeping the existing suggestions");
+                }
                 const completedProduct: StoredProduct = {
                     ...scrapedProduct,
                     suggestions,
@@ -268,7 +295,15 @@ async function processDataset(
 
 async function main(): Promise<void> {
     const suggestionService = createSuggestionService();
-    const { errors, output } = await processDataset(DATASET_FILENAME, suggestionService);
+    let result: Awaited<ReturnType<typeof processDataset>>;
+
+    try {
+        result = await processDataset(DATASET_FILENAME, suggestionService);
+    } finally {
+        await closeAmazonBrowser();
+    }
+
+    const { errors, output } = result;
     console.log("\nGenerating self-contained HTML report...");
     await generateReport(output, REPORT_DIRECTORY, suggestionService.reportConfig);
     console.log(`Report generated at ${path.join(REPORT_DIRECTORY, "index.html")}`);

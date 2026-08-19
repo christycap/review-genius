@@ -19,7 +19,7 @@ Review Genius processes a list of Amazon ASINs grouped by market and produces an
 For each product, the tool:
 
 1. Fetches the localized Amazon product page.
-2. Extracts the title, feature bullets, description, product image, overall rating, total review count, and a sample of review titles and comments.
+2. Extracts the title, feature bullets, description, product image, overall rating, and total review count. It then builds a corpus of up to 30 recent reviews, deliberately adding recent 1–3-star feedback so customer concerns are represented alongside praise.
 3. Sends the complete product and review context to the configured AI provider: DeepSeek or Gemini.
 4. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
 5. Builds a self-contained React report with market/product navigation, comparisons, character counts, copy controls, review context, and light/dark themes.
@@ -27,8 +27,8 @@ For each product, the tool:
 
 ```mermaid
 flowchart LR
-    A[Market + ASIN input] --> B[Serialized Amazon fetch]
-    B --> C[Deterministic parser]
+    A[Market + ASIN input] --> B[Serialized Amazon browser collection]
+    B --> C[Recent + critical review corpus]
     C --> D[Serialized AI enrichment]
     D --> E[Validated JSON output]
     E --> F[Self-contained HTML report]
@@ -36,7 +36,7 @@ flowchart LR
     G --> F
 ```
 
-All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon fetch is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Amazon pages and report assets are cached under `.cache/`, allowing interrupted runs to resume without repeating completed work.
+All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while recent review corpora are refreshed after 24 hours. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
 
 ## Report preview
 
@@ -54,6 +54,7 @@ All build-time external requests are deliberately serialized to avoid parallel r
 -   [Node.js 22 or newer](https://nodejs.org/) and npm
 -   A valid [DeepSeek API key](https://platform.deepseek.com/api_keys) or [Gemini API key](https://aistudio.google.com/app/apikey)
 -   Network access to the Amazon marketplaces being processed
+-   An interactive desktop session so the visible Amazon browser can be used for sign-in or a CAPTCHA when Amazon requests one
 
 Amazon may block requests originating from datacenter, VPN, or cloud-development IP addresses. Running from a normal domestic connection is recommended if Amazon returns a challenge page. Always use the tool responsibly and respect Amazon's applicable terms and policies.
 
@@ -92,6 +93,18 @@ GEMINI_MODEL=gemini-3.7-flash
 The build stops before processing if both keys are set, neither key is set, or Gemini is selected without `GEMINI_MODEL`.
 
 The `.env` file is ignored by Git. Never commit it. The selected provider key is deliberately embedded in the generated report's JavaScript so the local browser can regenerate suggestions without a server. Share a generated report archive only with collaborators who are allowed to use that key.
+
+## Authenticate with Amazon
+
+Review Genius uses a dedicated persisted browser profile under `.cache/amazon-browser-profile`. It does not copy or unlock cookies from your everyday Chrome profile. Before a large run, open the dedicated session:
+
+```bash
+npm run amazon:login
+```
+
+One Amazon account page opens for every configured marketplace. Sign in where required, complete any Amazon challenge, then return to the terminal and press Enter. The session is reused by subsequent builds.
+
+You can also start `npm run build` directly. If a review page redirects to sign-in or presents a CAPTCHA, the build keeps its visible browser open, prints the affected market and ASIN, and pauses until you resolve it and press Enter in the terminal. No CAPTCHA is bypassed programmatically.
 
 ## Input format
 
@@ -146,7 +159,7 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes any completed work, fetches missing Amazon data, requests missing or outdated AI suggestions, downloads report assets, and generates the website.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated AI suggestions, downloads report assets, and generates the website. Run it from an interactive terminal so it can pause for operator action if Amazon requests authentication.
 
 Open [`output/Smartbox_2026/index.html`](output/Smartbox_2026/index.html) directly in a browser. No web server or internet connection is required to browse a completed report; an internet connection is required only when regenerating suggestions.
 
@@ -174,7 +187,7 @@ The prompt is designed around several principles:
 -   **Four shopper decisions.** Copy is organized around recognition, relevance, confidence, and desire.
 -   **Search intent before arbitrary brevity.** Titles respect Amazon's general 200-character limit. A compact title remains preferable, but source-supported product, occasion, recipient, and long-tail search phrases are retained when their discovery value outweighs a soft display-length preference.
 -   **One coordinated listing.** The title, feature list, and description are planned together. Important information moved out of one field must remain in the most useful destination, and each rationale identifies meaningful cross-field moves.
--   **Reviews as prioritization signals.** Review titles and comments help surface customer vocabulary, valued benefits, uncertainties, and objections. They are never treated as verified product facts.
+-   **Reviews as prioritization signals.** Up to 30 recent reviews—and deliberate recent 1–3-star coverage—help surface customer vocabulary, valued benefits, uncertainties, and objections. The prompt explicitly treats this as a qualitative corpus rather than a representative rating distribution, and never treats review claims as verified product facts.
 -   **No invented claims.** Suggested benefits must follow conservatively from facts already present in the listing.
 -   **Language separation.** Suggested listing copy remains in the source market language; concise editorial reasoning is returned in English.
 -   **Auditable output.** Each rationale explains its field in the context of the complete proposal, names concrete changes or information movements, and states the expected improvement to discoverability, comprehension, confidence, or conversion.
