@@ -92,7 +92,7 @@ GEMINI_MODEL=gemini-3.7-flash
 
 The build stops before processing if both keys are set, neither key is set, or Gemini is selected without `GEMINI_MODEL`.
 
-The `.env` file is ignored by Git. Never commit it. The selected provider key is deliberately embedded in the generated report's JavaScript so the local browser can regenerate suggestions without a server. Share a generated report archive only with collaborators who are allowed to use that key.
+The `.env` file is ignored by Git. Never commit it. The selected provider key is deliberately embedded in the generated HTML so the local browser can regenerate suggestions without a server. Share the report only with collaborators who are allowed to use that key.
 
 ## Authenticate with Amazon
 
@@ -159,23 +159,26 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated AI suggestions, downloads report assets, and generates the website. Run it from an interactive terminal so it can pause for operator action if Amazon requests authentication.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated AI suggestions, and generates the website. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
 
-Open [`output/Smartbox_2026/index.html`](output/Smartbox_2026/index.html) directly in a browser. No web server or internet connection is required to browse a completed report; an internet connection is required only when regenerating suggestions.
+The build produces exactly two deliverables:
 
-On macOS, for example (or double click on the index.html):
+-   [`output/Smartbox_2026.html`](output/Smartbox_2026.html): a single-file website containing its CSS, JavaScript, favicon, logo, product images, report data, and AI configuration.
+-   [`output/Smartbox_2026.json`](output/Smartbox_2026.json): the readable deterministic dataset, also used to resume future builds.
+
+Open the HTML file directly in a browser. No web server or internet connection is required to browse the report; an internet connection is required only when regenerating suggestions.
+
+On macOS, for example (or double-click the HTML file):
 
 ```bash
-open output/Smartbox_2026/index.html
+open output/Smartbox_2026.html
 ```
-
-The generated `assets/data.json` preserves the deterministic output structure.
 
 ### Refine a suggestion in the report
 
 For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, reviews, current suggestions, and additional feedback to the provider and model selected during the build. The same system prompt, structured response format, and deterministic validation are reused.
 
-The refined title, features, description, and English rationales replace the displayed proposal. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `assets/data.json` inside the archive.
+The refined title, features, description, and English rationales replace the displayed proposal. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `output/Smartbox_2026.json`.
 
 ## The optimization prompt
 

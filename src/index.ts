@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
 import { createSuggestionService, type SuggestionService } from "./ai.js";
@@ -22,9 +22,11 @@ const INPUT_DIRECTORY = path.resolve("input");
 const OUTPUT_DIRECTORY = path.resolve("output");
 const DATASET_FILENAME = "Smartbox_2026.json";
 const DATASET_TITLE = inferReportTitle(DATASET_FILENAME);
-const REPORT_DIRECTORY = path.join(OUTPUT_DIRECTORY, path.parse(DATASET_FILENAME).name);
-const DATA_OUTPUT_PATH = path.join(REPORT_DIRECTORY, "assets/data.json");
-const LEGACY_DATA_OUTPUT_PATH = path.join(OUTPUT_DIRECTORY, DATASET_FILENAME);
+const DATASET_BASENAME = path.parse(DATASET_FILENAME).name;
+const REPORT_OUTPUT_PATH = path.join(OUTPUT_DIRECTORY, `${DATASET_BASENAME}.html`);
+const DATA_OUTPUT_PATH = path.join(OUTPUT_DIRECTORY, `${DATASET_BASENAME}.json`);
+const LEGACY_REPORT_DIRECTORY = path.join(OUTPUT_DIRECTORY, DATASET_BASENAME);
+const LEGACY_DATA_OUTPUT_PATH = path.join(LEGACY_REPORT_DIRECTORY, "assets/data.json");
 
 type ExistingOutput = {
     output: StoredOutput;
@@ -305,8 +307,13 @@ async function main(): Promise<void> {
 
     const { errors, output } = result;
     console.log("\nGenerating self-contained HTML report...");
-    await generateReport(output, REPORT_DIRECTORY, suggestionService.reportConfig);
-    console.log(`Report generated at ${path.join(REPORT_DIRECTORY, "index.html")}`);
+    await generateReport(output, REPORT_OUTPUT_PATH, suggestionService.reportConfig);
+    await Promise.all([
+        rm(LEGACY_REPORT_DIRECTORY, { recursive: true, force: true }),
+        rm(path.join(OUTPUT_DIRECTORY, ".DS_Store"), { force: true })
+    ]);
+    console.log(`Report generated at ${REPORT_OUTPUT_PATH}`);
+    console.log(`Raw data saved at ${DATA_OUTPUT_PATH}`);
 
     if (errors.length > 0) {
         throw new Error(

@@ -52,6 +52,7 @@ type ReportData = {
 
 declare const __REPORT_DATA__: ReportData;
 declare const __REPORT_AI_CONFIG__: ReportAiConfig;
+declare const __REPORT_LOGO_URL__: string;
 
 const { title: reportTitle, markets: reportData } = __REPORT_DATA__;
 const reportAiConfig = __REPORT_AI_CONFIG__;
@@ -920,7 +921,7 @@ function Header({
         <header className="sticky top-0 z-30 border-b border-border/80 bg-background/90 backdrop-blur-xl">
             <div className="flex min-h-[88px] flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap sm:gap-4 sm:px-6 sm:py-0">
                 <div className="flex min-w-0 items-center gap-4">
-                    <img src="./assets/numberly-logo.svg" alt="Numberly" className="h-7 w-auto sm:h-9" />
+                    <img src={__REPORT_LOGO_URL__} alt="Numberly" className="h-7 w-auto sm:h-9" />
                     <Separator orientation="vertical" className="hidden h-8 sm:block" />
                     <div>
                         <p className="text-sm font-bold tracking-tight sm:text-lg">Review Genius 2.0</p>
