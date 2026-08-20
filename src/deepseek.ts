@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { writeProgressWarning } from "./console-progress.js";
 import { runExternalRequest } from "./external-request.js";
 import {
     createProductEnglishTranslationPrompt,
@@ -340,7 +341,7 @@ export async function suggestProductImprovementsWithDeepSeek(
                 throw error;
             }
 
-            console.warn(`    ${error.message}. Retrying immediately...`);
+            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
         }
     }
 
@@ -361,7 +362,7 @@ export async function translateProductContentWithDeepSeek(
                 throw error;
             }
 
-            console.warn(`    ${error.message}. Retrying immediately...`);
+            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
         }
     }
 
@@ -381,7 +382,7 @@ export async function analyzeReviewSentimentWithDeepSeek(
                 throw error;
             }
 
-            console.warn(`    ${error.message}. Retrying immediately...`);
+            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
         }
     }
 

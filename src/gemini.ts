@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { writeProgressWarning } from "./console-progress.js";
 import { runExternalRequest } from "./external-request.js";
 import {
     createProductEnglishTranslationPrompt,
@@ -407,7 +408,7 @@ export async function suggestProductImprovementsWithGemini(
                 throw error;
             }
 
-            console.warn(`    ${error.message}. Retrying immediately...`);
+            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
         }
     }
 
@@ -429,7 +430,7 @@ export async function translateProductContentWithGemini(
                 throw error;
             }
 
-            console.warn(`    ${error.message}. Retrying immediately...`);
+            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
         }
     }
 
@@ -450,7 +451,7 @@ export async function analyzeReviewSentimentWithGemini(
                 throw error;
             }
 
-            console.warn(`    ${error.message}. Retrying immediately...`);
+            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
         }
     }
 

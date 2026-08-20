@@ -5,6 +5,7 @@ import { createSuggestionService, type SuggestionService } from "./ai.js";
 import { closeAmazonBrowser } from "./amazon-browser.js";
 import { isReviewCollectionCurrent } from "./amazon-reviews.js";
 import { fetchProduct } from "./amazon.js";
+import { withElapsedStatus } from "./console-progress.js";
 import { DEEPSEEK_MODEL } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
 import { createReviewSentimentSourceHash } from "./review-sentiment-source.js";
@@ -310,10 +311,10 @@ async function processDataset(
                     : await (async () => {
                           setOutputProduct(scrapedOnlyProduct);
                           await writeOutput(DATA_OUTPUT_PATH, output);
-                          console.log(
-                              `    Requesting ${suggestionService.providerName} review sentiment analysis...`
+                          return withElapsedStatus(
+                              `    Requesting ${suggestionService.providerName} review sentiment analysis...`,
+                              () => suggestionService.analyzeReviews(market, scrapedProduct.reviews)
                           );
-                          return suggestionService.analyzeReviews(market, scrapedProduct.reviews);
                       })();
 
                 if (canReuseReviewSentiment) {
@@ -345,8 +346,10 @@ async function processDataset(
                     ? existingProduct.suggestions!
                     : await (async () => {
                           await writeOutput(DATA_OUTPUT_PATH, output);
-                          console.log(`    Requesting ${suggestionService.providerName} suggestions...`);
-                          return suggestionService.suggest(market, analyzedProduct);
+                          return withElapsedStatus(
+                              `    Requesting ${suggestionService.providerName} suggestions...`,
+                              () => suggestionService.suggest(market, analyzedProduct)
+                          );
                       })();
 
                 if (canReuseSuggestions) {
@@ -388,13 +391,9 @@ async function processDataset(
                     // Persist expensive suggestions before the separate translation request so a
                     // transient translation failure can resume without asking the model to rewrite.
                     await writeOutput(DATA_OUTPUT_PATH, output);
-                    console.log(
-                        `    Requesting ${suggestionService.providerName} English translations...`
-                    );
-                    const englishTranslations = await suggestionService.translate(
-                        market,
-                        analyzedProduct,
-                        suggestions
+                    const englishTranslations = await withElapsedStatus(
+                        `    Requesting ${suggestionService.providerName} English translations...`,
+                        () => suggestionService.translate(market, analyzedProduct, suggestions)
                     );
                     completedProduct = {
                         ...suggestionProduct,
