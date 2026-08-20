@@ -10,6 +10,7 @@ import {
     Lightbulb,
     ListChecks,
     LoaderCircle,
+    Languages,
     MessageSquarePlus,
     Moon,
     RotateCcw,
@@ -20,15 +21,19 @@ import {
     Tag,
     UsersRound
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReportAiConfig } from "../ai.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "../prompts/product-optimization.js";
 import {
-    suggestionsSchema,
+    refinedSuggestionsSchema,
+    TRANSLATION_PROMPT_VERSION,
+    type ListingEnglishTranslations,
     type Market,
+    type ProductEnglishTranslations,
     type ProductReviews,
     type ProductSuggestions,
+    type RefinedSuggestions,
     type ScrapedProduct
 } from "../schemas.js";
 import { Badge } from "./components/ui/badge.js";
@@ -44,6 +49,8 @@ import { regenerateSuggestions } from "./regenerate-suggestions.js";
 type Product = ScrapedProduct & {
     suggestionPromptVersion?: number;
     suggestions?: ProductSuggestions;
+    englishTranslations?: ProductEnglishTranslations;
+    displayedSuggestionEnglishTranslations?: ListingEnglishTranslations;
 };
 type ReportData = {
     title: string;
@@ -60,11 +67,12 @@ const REFINEMENT_STORAGE_KEY = [
     "review-genius-refinements",
     reportTitle,
     PRODUCT_OPTIMIZATION_PROMPT_VERSION,
+    TRANSLATION_PROMPT_VERSION,
     reportAiConfig.provider,
     reportAiConfig.model
 ].join(":");
 
-type SuggestionOverrides = Record<string, ProductSuggestions>;
+type SuggestionOverrides = Record<string, RefinedSuggestions>;
 
 function getProductKey(market: Market, asin: string): string {
     return `${market}/${asin}`;
@@ -76,8 +84,8 @@ function readSuggestionOverrides(): SuggestionOverrides {
         if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
 
         return Object.fromEntries(
-            Object.entries(value).flatMap(([key, suggestions]) => {
-                const result = suggestionsSchema.safeParse(suggestions);
+            Object.entries(value).flatMap(([key, refinement]) => {
+                const result = refinedSuggestionsSchema.safeParse(refinement);
                 return result.success ? [[key, result.data]] : [];
             })
         );
@@ -196,6 +204,48 @@ function CopyButton({ value, label = "Copy" }: { value: string; label?: string }
     );
 }
 
+function EnglishTranslationReveal({
+    children,
+    className,
+    buttonClassName
+}: {
+    children: React.ReactNode;
+    className?: string;
+    buttonClassName?: string;
+}) {
+    const [visible, setVisible] = useState(false);
+    const translationId = useId();
+
+    return (
+        <div className="mt-3">
+            <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn("h-7 px-2 text-xs text-muted-foreground", buttonClassName)}
+                onClick={() => setVisible(value => !value)}
+                aria-expanded={visible}
+                aria-controls={translationId}
+            >
+                <Languages className="size-3.5" />
+                {visible ? "Hide English translation" : "Show English translation"}
+            </Button>
+            {visible && (
+                <div
+                    id={translationId}
+                    lang="en"
+                    className={cn(
+                        "mt-2 border-l-2 border-primary/25 pl-3 text-sm leading-6 text-muted-foreground italic",
+                        className
+                    )}
+                >
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function countCharacters(value: string): number {
     return Array.from(value).length;
 }
@@ -264,11 +314,20 @@ function TitleComparison({ product, languageTag }: { product: Product; languageT
             </CardHeader>
             <CardContent>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <TextPanel label="Current title" languageTag={languageTag} value={product.title} />
+                    <TextPanel
+                        label="Current title"
+                        languageTag={languageTag}
+                        value={product.title}
+                        englishTranslation={product.englishTranslations?.original.title}
+                    />
                     <TextPanel
                         label="Suggested title"
                         languageTag={languageTag}
                         value={suggestion.value}
+                        englishTranslation={
+                            product.displayedSuggestionEnglishTranslations?.title ??
+                            product.englishTranslations?.suggestions.title
+                        }
                         originalValue={product.title}
                         suggested
                     />
@@ -294,11 +353,16 @@ function FeatureComparison({ product, languageTag }: { product: Product; languag
                         label="Current features"
                         languageTag={languageTag}
                         values={product.productFeatures}
+                        englishTranslations={product.englishTranslations?.original.productFeatures}
                     />
                     <ListPanel
                         label="Suggested features"
                         languageTag={languageTag}
                         values={suggestion.value}
+                        englishTranslations={
+                            product.displayedSuggestionEnglishTranslations?.productFeatures ??
+                            product.englishTranslations?.suggestions.productFeatures
+                        }
                         originalValues={product.productFeatures}
                         suggested
                     />
@@ -324,11 +388,16 @@ function DescriptionComparison({ product, languageTag }: { product: Product; lan
                         label="Current description"
                         languageTag={languageTag}
                         value={product.description}
+                        englishTranslation={product.englishTranslations?.original.description}
                     />
                     <TextPanel
                         label="Suggested description"
                         languageTag={languageTag}
                         value={suggestion.value}
+                        englishTranslation={
+                            product.displayedSuggestionEnglishTranslations?.description ??
+                            product.englishTranslations?.suggestions.description
+                        }
                         originalValue={product.description}
                         suggested
                     />
@@ -343,12 +412,14 @@ function TextPanel({
     label,
     languageTag,
     value,
+    englishTranslation,
     originalValue,
     suggested = false
 }: {
     label: string;
     languageTag: string;
     value: string;
+    englishTranslation?: string;
     originalValue?: string;
     suggested?: boolean;
 }) {
@@ -377,6 +448,11 @@ function TextPanel({
             <p lang={languageTag} className="whitespace-pre-line text-sm leading-7">
                 {value || "—"}
             </p>
+            {englishTranslation !== undefined && value.trim() !== "" && (
+                <EnglishTranslationReveal>
+                    <p className="whitespace-pre-line">{englishTranslation || "—"}</p>
+                </EnglishTranslationReveal>
+            )}
         </div>
     );
 }
@@ -385,12 +461,14 @@ function ListPanel({
     label,
     languageTag,
     values,
+    englishTranslations,
     originalValues,
     suggested = false
 }: {
     label: string;
     languageTag: string;
     values: string[];
+    englishTranslations?: string[];
     originalValues?: string[];
     suggested?: boolean;
 }) {
@@ -429,8 +507,13 @@ function ListPanel({
                         >
                             {index + 1}
                         </span>
-                        <span lang={languageTag} className="min-w-0 flex-1">
-                            {value}
+                        <span className="min-w-0 flex-1">
+                            <span lang={languageTag}>{value}</span>
+                            {englishTranslations?.[index] !== undefined && (
+                                <EnglishTranslationReveal>
+                                    <span>{englishTranslations[index]}</span>
+                                </EnglishTranslationReveal>
+                            )}
                         </span>
                         <CopyButton value={value} label={`Copy feature ${index + 1}`} />
                     </li>
@@ -450,7 +533,7 @@ function SuggestionRegenerator({
     market: Market;
     product: Product;
     refined: boolean;
-    onRegenerated: (suggestions: ProductSuggestions) => void;
+    onRegenerated: (refinement: RefinedSuggestions) => void;
     onRestore: () => void;
 }) {
     const [open, setOpen] = useState(false);
@@ -468,14 +551,14 @@ function SuggestionRegenerator({
         setError(undefined);
 
         try {
-            const suggestions = await regenerateSuggestions(
+            const refinement = await regenerateSuggestions(
                 reportAiConfig,
                 market,
                 product,
                 product.suggestions,
                 additionalFeedback
             );
-            onRegenerated(suggestions);
+            onRegenerated(refinement);
             setFeedback("");
             setOpen(false);
         } catch (requestError) {
@@ -497,7 +580,8 @@ function SuggestionRegenerator({
                             <p className="font-semibold">Want to refine the recommendations?</p>
                             <p className="mt-1 text-sm leading-6 text-muted-foreground">
                                 Add product knowledge, keyword priorities, or editorial direction and ask{" "}
-                                {reportAiConfig.providerName} to reconsider the complete listing.
+                                {reportAiConfig.providerName} to reconsider the complete listing and
+                                refresh its English translation.
                             </p>
                         </div>
                     </div>
@@ -593,7 +677,7 @@ function SuggestionRegenerator({
                                 {loading ? (
                                     <>
                                         <LoaderCircle className="animate-spin" />
-                                        Regenerating with {reportAiConfig.providerName}…
+                                        Regenerating and translating with {reportAiConfig.providerName}…
                                     </>
                                 ) : (
                                     <>
@@ -620,7 +704,15 @@ function PendingSuggestions() {
     );
 }
 
-function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; languageTag: string }) {
+function ReviewsView({
+    reviews,
+    translations,
+    languageTag
+}: {
+    reviews: ProductReviews;
+    translations?: ProductEnglishTranslations["reviews"];
+    languageTag: string;
+}) {
     const criticalCoverage = reviews.items.filter(
         review => review.selectionReason === "critical"
     ).length;
@@ -670,55 +762,83 @@ function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; langua
             </Card>
 
             <div className="grid gap-4 lg:grid-cols-2">
-                {reviews.items.map((review, index) => (
-                    <Card key={review.id ?? `${index}-${review.comment}`} className="gap-4 py-5">
-                        <CardHeader className="px-5">
-                            <div className="space-y-3">
-                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <RatingStars rating={review.rating} />
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <Badge variant="outline">{review.rating}/5</Badge>
-                                        {review.selectionReason === "critical" && (
-                                            <Badge variant="secondary">Concern coverage</Badge>
-                                        )}
-                                        {review.verifiedPurchase && (
-                                            <Badge variant="secondary">Verified purchase</Badge>
-                                        )}
-                                        <CopyButton
-                                            value={[review.title, review.comment]
-                                                .filter((value): value is string => Boolean(value))
-                                                .join("\n\n")}
-                                            label="Copy this review"
-                                        />
+                {reviews.items.map((review, index) => {
+                    const translation = translations?.[index];
+
+                    return (
+                        <Card key={review.id ?? `${index}-${review.comment}`} className="gap-4 py-5">
+                            <CardHeader className="px-5">
+                                <div className="space-y-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <RatingStars rating={review.rating} />
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Badge variant="outline">{review.rating}/5</Badge>
+                                            {review.selectionReason === "critical" && (
+                                                <Badge variant="secondary">Concern coverage</Badge>
+                                            )}
+                                            {review.verifiedPurchase && (
+                                                <Badge variant="secondary">Verified purchase</Badge>
+                                            )}
+                                            <CopyButton
+                                                value={[review.title, review.comment]
+                                                    .filter((value): value is string => Boolean(value))
+                                                    .join("\n\n")}
+                                                label="Copy this review"
+                                            />
+                                        </div>
                                     </div>
+                                    {review.title && (
+                                        <CardTitle
+                                            lang={review.sourceLanguage ?? languageTag}
+                                            className="text-base leading-6"
+                                        >
+                                            {review.title}
+                                        </CardTitle>
+                                    )}
+                                    {(review.dateText || review.variant) && (
+                                        <div
+                                            lang={review.sourceLanguage ?? languageTag}
+                                            className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                                        >
+                                            {review.dateText && <span>{review.dateText}</span>}
+                                            {review.variant && <span>{review.variant}</span>}
+                                        </div>
+                                    )}
                                 </div>
-                                {review.title && (
-                                    <CardTitle
-                                        lang={review.sourceLanguage ?? languageTag}
-                                        className="text-base leading-6"
-                                    >
-                                        {review.title}
-                                    </CardTitle>
-                                )}
-                                {(review.dateText || review.variant) && (
-                                    <div
-                                        lang={review.sourceLanguage ?? languageTag}
-                                        className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                                    >
-                                        {review.dateText && <span>{review.dateText}</span>}
-                                        {review.variant && <span>{review.variant}</span>}
-                                    </div>
-                                )}
-                            </div>
-                        </CardHeader>
-                        <CardContent
-                            lang={review.sourceLanguage ?? languageTag}
-                            className="px-5 text-sm leading-6 text-muted-foreground"
-                        >
-                            “{review.comment}”
-                        </CardContent>
-                    </Card>
-                ))}
+                            </CardHeader>
+                            <CardContent
+                                lang={review.sourceLanguage ?? languageTag}
+                                className="px-5 text-sm leading-6 text-muted-foreground"
+                            >
+                                “{review.comment}”
+                            </CardContent>
+                            {translation && (
+                                <div className="px-5">
+                                    <EnglishTranslationReveal>
+                                        <div className="space-y-2">
+                                            {translation.title && (
+                                                <p className="font-semibold text-foreground/75 not-italic">
+                                                    {translation.title}
+                                                </p>
+                                            )}
+                                            {(translation.dateText || translation.variant) && (
+                                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                                                    {translation.dateText && (
+                                                        <span>{translation.dateText}</span>
+                                                    )}
+                                                    {translation.variant && (
+                                                        <span>{translation.variant}</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            <p>“{translation.comment}”</p>
+                                        </div>
+                                    </EnglishTranslationReveal>
+                                </div>
+                            )}
+                        </Card>
+                    );
+                })}
             </div>
 
             <p className="text-center text-xs text-muted-foreground">
@@ -762,6 +882,16 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                     >
                         {product.title}
                     </h1>
+                    {product.englishTranslations?.original.title && (
+                        <EnglishTranslationReveal
+                            buttonClassName="text-white/75 hover:bg-white/10 hover:text-white"
+                            className="border-white/30 text-white/75"
+                        >
+                            <p className="max-w-4xl text-base">
+                                {product.englishTranslations.original.title}
+                            </p>
+                        </EnglishTranslationReveal>
+                    )}
                     <div className="mt-6">
                         <Button asChild variant="secondary" size="sm">
                             <a
@@ -796,7 +926,8 @@ function ProductNavigation({
         group?.products.filter(
             product =>
                 product.asin.toLocaleLowerCase().includes(normalizedQuery) ||
-                product.title.toLocaleLowerCase().includes(normalizedQuery)
+                product.title.toLocaleLowerCase().includes(normalizedQuery) ||
+                product.englishTranslations?.original.title.toLocaleLowerCase().includes(normalizedQuery)
         ) ?? [];
 
     return (
@@ -837,10 +968,14 @@ function ProductNavigation({
                         </span>
                         <span className="min-w-0 flex-1">
                             <span
-                                lang={marketMetadata[market].languageTag}
+                                lang={
+                                    product.englishTranslations
+                                        ? "en"
+                                        : marketMetadata[market].languageTag
+                                }
                                 className="line-clamp-2 text-xs leading-4 font-medium"
                             >
-                                {product.title}
+                                {product.englishTranslations?.original.title ?? product.title}
                             </span>
                             <span
                                 className={cn(
@@ -885,9 +1020,9 @@ function MobileProductSelector({ market, asin }: { market: Market; asin: string 
                     <option
                         key={product.asin}
                         value={product.asin}
-                        lang={marketMetadata[market].languageTag}
+                        lang={product.englishTranslations ? "en" : marketMetadata[market].languageTag}
                     >
-                        {product.asin} — {product.title}
+                        {product.asin} — {product.englishTranslations?.original.title ?? product.title}
                     </option>
                 ))}
             </select>
@@ -994,16 +1129,21 @@ function App() {
     );
     const product = group?.products.find(item => item.asin === selection.asin) ?? group?.products[0];
     const selectedProductKey = product ? getProductKey(group?.market ?? "fr", product.asin) : "";
-    const refinedSuggestions = suggestionOverrides[selectedProductKey];
+    const refinement = suggestionOverrides[selectedProductKey];
     const displayedProduct = product
-        ? { ...product, suggestions: refinedSuggestions ?? product.suggestions }
+        ? {
+              ...product,
+              suggestions: refinement?.suggestions ?? product.suggestions,
+              displayedSuggestionEnglishTranslations:
+                  refinement?.englishTranslations ?? product.englishTranslations?.suggestions
+          }
         : undefined;
 
-    function updateSuggestionOverride(suggestions: ProductSuggestions): void {
+    function updateSuggestionOverride(nextRefinement: RefinedSuggestions): void {
         if (!selectedProductKey) return;
 
         setSuggestionOverrides(current => {
-            const next = { ...current, [selectedProductKey]: suggestions };
+            const next = { ...current, [selectedProductKey]: nextRefinement };
             writeSuggestionOverrides(next);
             return next;
         });
@@ -1081,7 +1221,7 @@ function App() {
                                     key={selectedProductKey}
                                     market={group.market}
                                     product={displayedProduct}
-                                    refined={refinedSuggestions !== undefined}
+                                    refined={refinement !== undefined}
                                     onRegenerated={updateSuggestionOverride}
                                     onRestore={restoreReportSuggestions}
                                 />
@@ -1101,6 +1241,7 @@ function App() {
                             <TabsContent value="reviews" className="mt-6">
                                 <ReviewsView
                                     reviews={product.reviews}
+                                    translations={product.englishTranslations?.reviews}
                                     languageTag={marketMetadata[group.market].languageTag}
                                 />
                             </TabsContent>

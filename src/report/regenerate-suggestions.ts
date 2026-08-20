@@ -1,12 +1,27 @@
 import { z } from "zod";
 import type { ReportAiConfig } from "../ai.js";
 import {
+    createSuggestedListingEnglishTranslationPrompt,
+    ENGLISH_TRANSLATION_SYSTEM_PROMPT,
+    SUGGESTED_LISTING_ENGLISH_TRANSLATIONS_JSON_SCHEMA
+} from "../prompts/english-translation.js";
+import {
     createProductRefinementUserPrompt,
     PRODUCT_OPTIMIZATION_SYSTEM_PROMPT,
     PRODUCT_SUGGESTIONS_JSON_SCHEMA
 } from "../prompts/product-optimization.js";
-import type { Market, ProductSuggestions, ScrapedProduct } from "../schemas.js";
+import type {
+    ListingEnglishTranslations,
+    Market,
+    ProductSuggestions,
+    RefinedSuggestions,
+    ScrapedProduct
+} from "../schemas.js";
 import { parseAndValidateSuggestions, SuggestionValidationError } from "../suggestion-validation.js";
+import {
+    parseAndValidateListingEnglishTranslations,
+    TranslationValidationError
+} from "../translation-validation.js";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -55,8 +70,6 @@ class BrowserAiError extends Error {
         super(message);
     }
 }
-
-const delay = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
 
 function isRetryableStatus(status: number): boolean {
     return status === 408 || status === 429 || status >= 500;
@@ -290,18 +303,135 @@ async function requestGeminiSuggestions(
     return validateResponse(config.providerName, content, product, currentSuggestions);
 }
 
-export async function regenerateSuggestions(
+function validateTranslationResponse(
+    providerName: string,
+    content: string,
+    suggestions: ProductSuggestions
+): ListingEnglishTranslations {
+    try {
+        return parseAndValidateListingEnglishTranslations(content, suggestions, providerName);
+    } catch (error) {
+        if (error instanceof TranslationValidationError) {
+            throw new BrowserAiError(error.message, true);
+        }
+        throw error;
+    }
+}
+
+async function requestDeepSeekTranslations(
     config: ReportAiConfig,
     market: Market,
-    product: ScrapedProduct,
-    currentSuggestions: ProductSuggestions | undefined,
-    feedback: string
-): Promise<ProductSuggestions> {
-    const request = () =>
-        config.provider === "deepseek"
-            ? requestDeepSeekSuggestions(config, market, product, currentSuggestions, feedback)
-            : requestGeminiSuggestions(config, market, product, currentSuggestions, feedback);
+    suggestions: ProductSuggestions
+): Promise<ListingEnglishTranslations> {
+    const responseValue = await fetchFromBrowser(config.providerName, DEEPSEEK_URL, {
+        method: "POST",
+        headers: {
+            authorization: `Bearer ${config.apiKey}`,
+            "content-type": "application/json"
+        },
+        body: JSON.stringify({
+            model: config.model,
+            // Keep browser refinements consistent with build-time translations: the optimization
+            // request reasons deeply, while the following translation request does not.
+            thinking: { type: "disabled" },
+            messages: [
+                { role: "system", content: ENGLISH_TRANSLATION_SYSTEM_PROMPT },
+                {
+                    role: "user",
+                    content: createSuggestedListingEnglishTranslationPrompt(market, suggestions)
+                }
+            ],
+            response_format: { type: "json_object" },
+            max_tokens: 16_384
+        })
+    });
 
+    const result = deepSeekResponseSchema.safeParse(responseValue);
+    if (!result.success) {
+        throw new BrowserAiError(
+            `DeepSeek returned an unexpected translation response: ${result.error.message}`,
+            true
+        );
+    }
+
+    const choice = result.data.choices[0];
+    if (choice.finish_reason !== "stop") {
+        throw new BrowserAiError(
+            `DeepSeek translation stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
+            choice.finish_reason === "insufficient_system_resource"
+        );
+    }
+
+    return validateTranslationResponse(config.providerName, choice.message.content ?? "", suggestions);
+}
+
+async function requestGeminiTranslations(
+    config: ReportAiConfig,
+    market: Market,
+    suggestions: ProductSuggestions
+): Promise<ListingEnglishTranslations> {
+    const responseValue = await fetchFromBrowser(
+        config.providerName,
+        `${GEMINI_API_BASE_URL}/${encodeURIComponent(config.model)}:generateContent`,
+        {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "x-goog-api-key": config.apiKey
+            },
+            body: JSON.stringify({
+                systemInstruction: {
+                    parts: [{ text: ENGLISH_TRANSLATION_SYSTEM_PROMPT }]
+                },
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            {
+                                text: createSuggestedListingEnglishTranslationPrompt(market, suggestions)
+                            }
+                        ]
+                    }
+                ],
+                generationConfig: {
+                    maxOutputTokens: 16_384,
+                    responseFormat: {
+                        text: {
+                            mimeType: "APPLICATION_JSON",
+                            schema: SUGGESTED_LISTING_ENGLISH_TRANSLATIONS_JSON_SCHEMA
+                        }
+                    }
+                }
+            })
+        }
+    );
+
+    const result = geminiResponseSchema.safeParse(responseValue);
+    if (!result.success) {
+        throw new BrowserAiError(
+            `Gemini returned an unexpected translation response: ${result.error.message}`,
+            true
+        );
+    }
+
+    const candidate = result.data.candidates[0];
+    if (candidate.finishReason !== "STOP") {
+        throw new BrowserAiError(
+            `Gemini translation stopped with finish reason ${candidate.finishReason ?? "unknown"}`,
+            candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "OTHER"
+        );
+    }
+
+    const content =
+        candidate.content?.parts
+            .filter(part => part.thought !== true)
+            .map(part => part.text ?? "")
+            .join("") ?? "";
+
+    return validateTranslationResponse(config.providerName, content, suggestions);
+}
+
+async function retryBrowserRequest<T>(request: () => Promise<T>): Promise<T> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
             return await request();
@@ -310,9 +440,30 @@ export async function regenerateSuggestions(
                 throw error;
             }
 
-            await delay(1_000 * 2 ** (attempt - 1));
+            // A new response may satisfy deterministic validation; no artificial wait is needed.
         }
     }
 
-    throw new BrowserAiError(`${config.providerName} request failed unexpectedly`);
+    throw new BrowserAiError("AI request failed unexpectedly");
+}
+
+export async function regenerateSuggestions(
+    config: ReportAiConfig,
+    market: Market,
+    product: ScrapedProduct,
+    currentSuggestions: ProductSuggestions | undefined,
+    feedback: string
+): Promise<RefinedSuggestions> {
+    const suggestions = await retryBrowserRequest(() =>
+        config.provider === "deepseek"
+            ? requestDeepSeekSuggestions(config, market, product, currentSuggestions, feedback)
+            : requestGeminiSuggestions(config, market, product, currentSuggestions, feedback)
+    );
+    const englishTranslations = await retryBrowserRequest(() =>
+        config.provider === "deepseek"
+            ? requestDeepSeekTranslations(config, market, suggestions)
+            : requestGeminiTranslations(config, market, suggestions)
+    );
+
+    return { suggestions, englishTranslations };
 }

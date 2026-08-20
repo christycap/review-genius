@@ -22,18 +22,20 @@ For each product, the tool:
 2. Extracts the title, feature bullets, description, product image, overall rating, and total review count. It then builds a corpus of up to 30 recent reviews, deliberately adding recent 1–3-star feedback so customer concerns are represented alongside praise.
 3. Sends the complete product and review context to the configured AI provider: DeepSeek or Gemini.
 4. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
-5. Builds a self-contained React report with market/product navigation, comparisons, character counts, copy controls, review context, and light/dark themes.
-6. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback.
+5. Makes a separate, faithful translation pass over the original listing, proposed listing, and extracted reviews so an international client can inspect every market in English without weakening the optimization prompt.
+6. Builds a self-contained React report with market/product navigation, on-demand English translations, comparisons, character counts, copy controls, review context, and light/dark themes.
+7. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback; the new suggestion's English translation is refreshed at the same time.
 
 ```mermaid
 flowchart LR
     A[Market + ASIN input] --> B[Serialized Amazon browser collection]
     B --> C[Recent + critical review corpus]
-    C --> D[Serialized AI enrichment]
-    D --> E[Validated JSON output]
-    E --> F[Self-contained HTML report]
-    F --> G[Optional browser feedback refinement]
-    G --> F
+    C --> D[AI listing optimization]
+    D --> E[AI English translation]
+    E --> F[Validated JSON output]
+    F --> G[Self-contained HTML report]
+    G --> H[Optional browser feedback refinement + translation]
+    H --> G
 ```
 
 All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while recent review corpora are refreshed after 24 hours. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
@@ -159,14 +161,14 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated AI suggestions, and generates the website. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated AI suggestions and English translations, and generates the website. Translation cache metadata covers the exact original copy, proposed copy, and review corpus, so changing any of them refreshes the translation without re-scraping otherwise current Amazon data. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
 
 The build produces exactly two deliverables:
 
 -   [`output/Smartbox_2026.html`](output/Smartbox_2026.html): a single-file website containing its CSS, JavaScript, favicon, logo, product images, report data, and AI configuration.
 -   [`output/Smartbox_2026.json`](output/Smartbox_2026.json): the readable deterministic dataset, also used to resume future builds.
 
-Open the HTML file directly in a browser. No web server or internet connection is required to browse the report; an internet connection is required only when regenerating suggestions.
+Open the HTML file directly in a browser. No web server or internet connection is required to browse the report or reveal translations; all initial translations are embedded at build time. An internet connection is required only when regenerating suggestions.
 
 On macOS, for example (or double-click the HTML file):
 
@@ -176,9 +178,9 @@ open output/Smartbox_2026.html
 
 ### Refine a suggestion in the report
 
-For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, reviews, current suggestions, and additional feedback to the provider and model selected during the build. The same system prompt, structured response format, and deterministic validation are reused.
+For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, reviews, current suggestions, and additional feedback to the provider and model selected during the build. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
 
-The refined title, features, description, and English rationales replace the displayed proposal. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `output/Smartbox_2026.json`.
+The refined title, features, description, English rationales, and English translations replace the displayed proposal as one unit. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `output/Smartbox_2026.json`.
 
 ## The optimization prompt
 
@@ -198,3 +200,11 @@ The prompt is designed around several principles:
 DeepSeek runs in high-effort thinking mode, while Gemini uses its native structured-output format. Both providers pass through the same deterministic validation, which rejects malformed responses, unchanged fields, titles over the current limit, invalid feature counts, and complacent reasoning. Failed validations are retried before anything is saved.
 
 The provider and model are stored with every generated suggestion. Changing the provider, model, or prompt version invalidates only cached AI suggestions; previously scraped Amazon data remains reusable.
+
+## The translation prompt
+
+English translations use a separate, independently versioned prompt in [`src/prompts/english-translation.ts`](src/prompts/english-translation.ts). Keeping translation out of the optimization request lets the copy model concentrate on market-language search intent, conversion, whole-listing structure, and English reasoning before a focused second pass translates the finished material.
+
+The translation prompt is deliberately conservative: it preserves meaning, sentiment, quantities, product and brand names, feature/review ordering, and empty fields. It explicitly prohibits rewriting, optimizing, summarizing, softening critical reviews, or adding claims. Deterministic validation then verifies the listing feature counts and every review identifier before translations are stored.
+
+Translation prompt version, provider, model, and a hash of the complete translation source are persisted with each product. The report's **Show English translation** controls only reveal that embedded data and never make an API request. A browser refinement is explicitly user-triggered and necessarily translates its newly created suggestion at runtime; both the new copy and its translation are saved together in local storage.

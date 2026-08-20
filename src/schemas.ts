@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { PRODUCT_TRANSLATION_PROMPT_VERSION } from "./prompts/english-translation.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "./prompts/product-optimization.js";
 
 export const SUGGESTION_PROMPT_VERSION = PRODUCT_OPTIMIZATION_PROMPT_VERSION;
+export const TRANSLATION_PROMPT_VERSION = PRODUCT_TRANSLATION_PROMPT_VERSION;
 
 const asinSchema = z
     .string()
@@ -143,18 +145,65 @@ export const suggestionsSchema = z
 
 export const suggestionProviderSchema = z.enum(["deepseek", "gemini"]);
 
+export const listingEnglishTranslationsSchema = z
+    .object({
+        title: z.string(),
+        productFeatures: z.array(z.string()),
+        description: z.string()
+    })
+    .strict();
+
+export const reviewEnglishTranslationSchema = z
+    .object({
+        index: z.number().int().nonnegative(),
+        reviewKey: z.string().min(1),
+        title: z.string(),
+        comment: z.string(),
+        dateText: z.string(),
+        variant: z.string()
+    })
+    .strict();
+
+export const productEnglishTranslationsSchema = z
+    .object({
+        original: listingEnglishTranslationsSchema,
+        suggestions: listingEnglishTranslationsSchema,
+        reviews: z.array(reviewEnglishTranslationSchema)
+    })
+    .strict();
+
+export const refinedSuggestionsSchema = z
+    .object({
+        suggestions: suggestionsSchema,
+        englishTranslations: listingEnglishTranslationsSchema
+    })
+    .strict();
+
 export const storedProductSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema.optional(),
     suggestionPromptVersion: z.number().int().positive().optional(),
     suggestionProvider: suggestionProviderSchema.optional(),
-    suggestionModel: z.string().min(1).optional()
+    suggestionModel: z.string().min(1).optional(),
+    englishTranslations: productEnglishTranslationsSchema.optional(),
+    translationPromptVersion: z.number().int().positive().optional(),
+    translationProvider: suggestionProviderSchema.optional(),
+    translationModel: z.string().min(1).optional(),
+    translationSourceHash: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional()
 });
 
 export const productSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema,
     suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION),
     suggestionProvider: suggestionProviderSchema,
-    suggestionModel: z.string().min(1)
+    suggestionModel: z.string().min(1),
+    englishTranslations: productEnglishTranslationsSchema,
+    translationPromptVersion: z.literal(TRANSLATION_PROMPT_VERSION),
+    translationProvider: suggestionProviderSchema,
+    translationModel: z.string().min(1),
+    translationSourceHash: z.string().regex(/^[a-f0-9]{64}$/)
 });
 
 const storedMarketOutputSchema = z
@@ -232,6 +281,9 @@ export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
 export type ProductReviews = z.infer<typeof productReviewsSchema>;
 export type Review = z.infer<typeof reviewSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
+export type ListingEnglishTranslations = z.infer<typeof listingEnglishTranslationsSchema>;
+export type ProductEnglishTranslations = z.infer<typeof productEnglishTranslationsSchema>;
+export type RefinedSuggestions = z.infer<typeof refinedSuggestionsSchema>;
 export type SuggestionProvider = z.infer<typeof suggestionProviderSchema>;
 export type StoredProduct = z.infer<typeof storedProductSchema>;
 export type StoredOutput = z.infer<typeof storedOutputSchema>;

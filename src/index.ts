@@ -9,6 +9,7 @@ import { DEEPSEEK_MODEL } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
 import {
     SUGGESTION_PROMPT_VERSION,
+    TRANSLATION_PROMPT_VERSION,
     inputSchema,
     legacyStoredOutputSchema,
     legacyUnwrappedStoredOutputSchema,
@@ -17,6 +18,7 @@ import {
     type StoredOutput,
     type StoredProduct
 } from "./schemas.js";
+import { createTranslationSourceHash } from "./translation-source.js";
 
 const INPUT_DIRECTORY = path.resolve("input");
 const OUTPUT_DIRECTORY = path.resolve("output");
@@ -179,6 +181,20 @@ function hasCurrentSuggestions(product: StoredProduct, suggestionService: Sugges
     return cachedProvider === suggestionService.provider && cachedModel === suggestionService.model;
 }
 
+function hasCurrentTranslations(product: StoredProduct, suggestionService: SuggestionService): boolean {
+    if (
+        product.suggestions === undefined ||
+        product.englishTranslations === undefined ||
+        product.translationPromptVersion !== TRANSLATION_PROMPT_VERSION ||
+        product.translationProvider !== suggestionService.provider ||
+        product.translationModel !== suggestionService.model
+    ) {
+        return false;
+    }
+
+    return product.translationSourceHash === createTranslationSourceHash(product, product.suggestions);
+}
+
 function reconcileOutput(input: Input, existingOutput: StoredOutput): StoredOutput {
     return {
         title: DATASET_TITLE,
@@ -226,6 +242,7 @@ async function processDataset(
             if (
                 existingProduct !== undefined &&
                 hasCurrentSuggestions(existingProduct, suggestionService) &&
+                hasCurrentTranslations(existingProduct, suggestionService) &&
                 !needsReviewRefresh
             ) {
                 existingProduct.suggestionProvider = suggestionService.provider;
@@ -263,8 +280,22 @@ async function processDataset(
                 if (canReuseSuggestions) {
                     console.log("    Review corpus is unchanged; keeping the existing suggestions");
                 }
-                const completedProduct: StoredProduct = {
-                    ...scrapedProduct,
+
+                const translationSourceHash = createTranslationSourceHash(scrapedProduct, suggestions);
+                const canReuseTranslations =
+                    existingProduct !== undefined &&
+                    existingProduct.englishTranslations !== undefined &&
+                    existingProduct.translationPromptVersion === TRANSLATION_PROMPT_VERSION &&
+                    existingProduct.translationProvider === suggestionService.provider &&
+                    existingProduct.translationModel === suggestionService.model &&
+                    existingProduct.translationSourceHash === translationSourceHash;
+                const suggestionProduct: StoredProduct = {
+                    asin: scrapedProduct.asin,
+                    title: scrapedProduct.title,
+                    productFeatures: scrapedProduct.productFeatures,
+                    description: scrapedProduct.description,
+                    productImageUrl: scrapedProduct.productImageUrl,
+                    reviews: scrapedProduct.reviews,
                     suggestions,
                     suggestionPromptVersion: SUGGESTION_PROMPT_VERSION,
                     suggestionProvider: suggestionService.provider,
@@ -272,7 +303,48 @@ async function processDataset(
                 };
 
                 if (existingIndex === -1) {
-                    marketOutput.products.push(completedProduct);
+                    marketOutput.products.push(suggestionProduct);
+                } else {
+                    marketOutput.products[existingIndex] = suggestionProduct;
+                }
+
+                let completedProduct: StoredProduct;
+                if (canReuseTranslations) {
+                    console.log(
+                        "    Source copy is unchanged; keeping the existing English translations"
+                    );
+                    completedProduct = {
+                        ...suggestionProduct,
+                        englishTranslations: existingProduct.englishTranslations!,
+                        translationPromptVersion: TRANSLATION_PROMPT_VERSION,
+                        translationProvider: suggestionService.provider,
+                        translationModel: suggestionService.model,
+                        translationSourceHash
+                    };
+                } else {
+                    // Persist expensive suggestions before the separate translation request so a
+                    // transient translation failure can resume without asking the model to rewrite.
+                    await writeOutput(DATA_OUTPUT_PATH, output);
+                    console.log(
+                        `    Requesting ${suggestionService.providerName} English translations...`
+                    );
+                    const englishTranslations = await suggestionService.translate(
+                        market,
+                        scrapedProduct,
+                        suggestions
+                    );
+                    completedProduct = {
+                        ...suggestionProduct,
+                        englishTranslations,
+                        translationPromptVersion: TRANSLATION_PROMPT_VERSION,
+                        translationProvider: suggestionService.provider,
+                        translationModel: suggestionService.model,
+                        translationSourceHash
+                    };
+                }
+
+                if (existingIndex === -1) {
+                    marketOutput.products[marketOutput.products.length - 1] = completedProduct;
                 } else {
                     marketOutput.products[existingIndex] = completedProduct;
                 }

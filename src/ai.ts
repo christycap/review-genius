@@ -1,7 +1,12 @@
-import { DEEPSEEK_MODEL, suggestProductImprovementsWithDeepSeek } from "./deepseek.js";
-import { suggestProductImprovementsWithGemini } from "./gemini.js";
+import {
+    DEEPSEEK_MODEL,
+    suggestProductImprovementsWithDeepSeek,
+    translateProductContentWithDeepSeek
+} from "./deepseek.js";
+import { suggestProductImprovementsWithGemini, translateProductContentWithGemini } from "./gemini.js";
 import {
     type Market,
+    type ProductEnglishTranslations,
     type ProductSuggestions,
     type ScrapedProduct,
     type SuggestionProvider
@@ -13,6 +18,11 @@ export type SuggestionService = {
     model: string;
     reportConfig: ReportAiConfig;
     suggest: (market: Market, product: ScrapedProduct) => Promise<ProductSuggestions>;
+    translate: (
+        market: Market,
+        product: ScrapedProduct,
+        suggestions: ProductSuggestions
+    ) => Promise<ProductEnglishTranslations>;
 };
 
 export type ReportAiConfig = {
@@ -53,7 +63,9 @@ export function createSuggestionService(
             model: reportConfig.model,
             reportConfig,
             suggest: (market, product) =>
-                suggestProductImprovementsWithDeepSeek(deepSeekApiKey, market, product)
+                suggestProductImprovementsWithDeepSeek(deepSeekApiKey, market, product),
+            translate: (market, product, suggestions) =>
+                translateProductContentWithDeepSeek(deepSeekApiKey, market, product, suggestions)
         };
     }
 
@@ -83,7 +95,9 @@ export function createSuggestionService(
             model: reportConfig.model,
             reportConfig,
             suggest: (market, product) =>
-                suggestProductImprovementsWithGemini(geminiApiKey, model, market, product)
+                suggestProductImprovementsWithGemini(geminiApiKey, model, market, product),
+            translate: (market, product, suggestions) =>
+                translateProductContentWithGemini(geminiApiKey, model, market, product, suggestions)
         };
     }
 
