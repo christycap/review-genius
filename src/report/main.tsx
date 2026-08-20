@@ -884,7 +884,7 @@ function SentimentReviewPanel({
             </Card>
 
             {entries.length > 0 ? (
-                <div className="max-h-[760px] space-y-4 overflow-y-auto pr-1">
+                <div className="space-y-4">
                     {entries.map(entry => (
                         <ReviewCard
                             key={entry.review.id ?? `${entry.index}-${entry.review.comment}`}
