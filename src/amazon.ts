@@ -5,6 +5,7 @@ import { createAmazonPage, waitForAmazonAccess } from "./amazon-browser.js";
 import { amazonMarketplaces, getAmazonProductUrl } from "./amazon-marketplaces.js";
 import { collectAmazonReviews, parseHelpfulVoteCount } from "./amazon-reviews.js";
 import { runExternalRequest } from "./external-request.js";
+import { stripAmazonRatingFromReviewTitle } from "./review-title.js";
 import type { Market, ScrapedProduct } from "./schemas.js";
 
 const CACHE_DIRECTORY = path.resolve(".cache/amazon");
@@ -244,7 +245,7 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
         const legacyTitle =
             cleanReviewText(legacyTitleElement.find("span").last().text()) ||
             cleanReviewText(legacyTitleElement.text());
-        const title = modernTitle || legacyTitle || null;
+        const title = stripAmazonRatingFromReviewTitle(modernTitle || legacyTitle || null);
         const ratingText = cleanText(
             review
                 .find('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')

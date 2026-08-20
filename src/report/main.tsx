@@ -28,6 +28,7 @@ import { createRoot } from "react-dom/client";
 import type { ReportAiConfig } from "../ai.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "../prompts/product-optimization.js";
 import { createReviewKey } from "../review-key.js";
+import { stripAmazonRatingFromReviewTitle } from "../review-title.js";
 import {
     refinedSuggestionsSchema,
     SENTIMENT_PROMPT_VERSION,
@@ -742,6 +743,8 @@ function sortReviewsByEvidence(entries: ReviewEntry[]): ReviewEntry[] {
 
 function ReviewCard({ entry, languageTag }: { entry: ReviewEntry; languageTag: string }) {
     const { review, translation, sentiment, index } = entry;
+    const reviewTitle = stripAmazonRatingFromReviewTitle(review.title);
+    const translatedTitle = stripAmazonRatingFromReviewTitle(translation?.title ?? null);
     const helpfulLabel = `${review.helpfulCount.toLocaleString("en")} ${
         review.helpfulCount === 1 ? "person" : "people"
     } found this helpful`;
@@ -769,19 +772,19 @@ function ReviewCard({ entry, languageTag }: { entry: ReviewEntry; languageTag: s
                                 <Badge variant="secondary">Verified purchase</Badge>
                             )}
                             <CopyButton
-                                value={[review.title, review.comment]
+                                value={[reviewTitle, review.comment]
                                     .filter((value): value is string => Boolean(value))
                                     .join("\n\n")}
                                 label="Copy this review"
                             />
                         </div>
                     </div>
-                    {review.title && (
+                    {reviewTitle && (
                         <CardTitle
                             lang={review.sourceLanguage ?? languageTag}
                             className="text-base leading-6"
                         >
-                            {review.title}
+                            {reviewTitle}
                         </CardTitle>
                     )}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -810,9 +813,9 @@ function ReviewCard({ entry, languageTag }: { entry: ReviewEntry; languageTag: s
                 <div className="px-5">
                     <EnglishTranslationReveal>
                         <div className="space-y-2">
-                            {translation.title && (
+                            {translatedTitle && (
                                 <p className="font-semibold text-foreground/75 not-italic">
-                                    {translation.title}
+                                    {translatedTitle}
                                 </p>
                             )}
                             {(translation.dateText || translation.variant) && (

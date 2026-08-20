@@ -6,6 +6,7 @@ import type { Page } from "puppeteer";
 import { createAmazonPage, waitForAmazonAccess } from "./amazon-browser.js";
 import { amazonMarketplaces } from "./amazon-marketplaces.js";
 import { runExternalRequest } from "./external-request.js";
+import { stripAmazonRatingFromReviewTitle } from "./review-title.js";
 import { productReviewsSchema, type Market, type ProductReviews, type Review } from "./schemas.js";
 
 export const AMAZON_REVIEW_LIMIT = 100;
@@ -270,7 +271,7 @@ export function parseAmazonReviewItems(
         const item: Review = {
             id,
             rating: rating as Review["rating"],
-            title: modernTitle || legacyTitle || null,
+            title: stripAmazonRatingFromReviewTitle(modernTitle || legacyTitle || null),
             comment: body,
             date: parseReviewDate(dateText),
             dateText,
