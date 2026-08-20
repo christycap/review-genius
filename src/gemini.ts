@@ -11,9 +11,21 @@ import {
     PRODUCT_SUGGESTIONS_JSON_SCHEMA
 } from "./prompts/product-optimization.js";
 import {
+    createReviewSentimentUserPrompt,
+    REVIEW_SENTIMENT_JSON_SCHEMA,
+    REVIEW_SENTIMENT_SYSTEM_PROMPT
+} from "./prompts/review-sentiment.js";
+import {
+    parseAndValidateReviewSentiment,
+    ReviewSentimentValidationError
+} from "./review-sentiment-validation.js";
+import {
     type Market,
     type ProductEnglishTranslations,
+    type ProductOptimizationProduct,
+    type ProductReviews,
     type ProductSuggestions,
+    type ReviewSentimentAnalysis,
     type ScrapedProduct
 } from "./schemas.js";
 import { parseAndValidateSuggestions, SuggestionValidationError } from "./suggestion-validation.js";
@@ -72,7 +84,7 @@ async function requestSuggestions(
     apiKey: string,
     model: string,
     market: Market,
-    product: ScrapedProduct
+    product: ProductOptimizationProduct
 ): Promise<ProductSuggestions> {
     let response: Response;
     let responseText: string;
@@ -280,11 +292,112 @@ async function requestTranslations(
     }
 }
 
+async function requestReviewSentiment(
+    apiKey: string,
+    model: string,
+    market: Market,
+    reviews: ProductReviews
+): Promise<ReviewSentimentAnalysis> {
+    let response: Response;
+    let responseText: string;
+
+    try {
+        ({ response, responseText } = await runExternalRequest(async () => {
+            const response = await fetch(
+                `${GEMINI_API_BASE_URL}/${encodeURIComponent(model)}:generateContent`,
+                {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/json",
+                        "x-goog-api-key": apiKey
+                    },
+                    body: JSON.stringify({
+                        systemInstruction: {
+                            parts: [{ text: REVIEW_SENTIMENT_SYSTEM_PROMPT }]
+                        },
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [{ text: createReviewSentimentUserPrompt(market, reviews) }]
+                            }
+                        ],
+                        generationConfig: {
+                            maxOutputTokens: 8_192,
+                            responseFormat: {
+                                text: {
+                                    mimeType: "APPLICATION_JSON",
+                                    schema: REVIEW_SENTIMENT_JSON_SCHEMA
+                                }
+                            }
+                        }
+                    }),
+                    signal: AbortSignal.timeout(240_000)
+                }
+            );
+
+            return { response, responseText: await response.text() };
+        }));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new GeminiError(`Gemini review-sentiment request failed: ${message}`, true);
+    }
+
+    let responseValue: unknown;
+    try {
+        responseValue = JSON.parse(responseText);
+    } catch {
+        throw new GeminiError(
+            response.ok
+                ? "Gemini returned a non-JSON review-sentiment API response"
+                : `Gemini returned HTTP ${response.status}`,
+            response.status === 429 || response.status >= 500
+        );
+    }
+
+    if (!response.ok) {
+        throw new GeminiError(
+            getApiErrorMessage(responseValue, response.status),
+            response.status === 408 || response.status === 429 || response.status >= 500
+        );
+    }
+
+    const result = geminiResponseSchema.safeParse(responseValue);
+    if (!result.success) {
+        throw new GeminiError(
+            `Gemini returned an unexpected review-sentiment API response: ${result.error.message}`,
+            true
+        );
+    }
+
+    const candidate = result.data.candidates[0];
+    if (candidate.finishReason !== "STOP") {
+        throw new GeminiError(
+            `Gemini review sentiment stopped with finish reason ${candidate.finishReason ?? "unknown"}`,
+            candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "OTHER"
+        );
+    }
+
+    const content =
+        candidate.content?.parts
+            .filter(part => part.thought !== true)
+            .map(part => part.text ?? "")
+            .join("") ?? "";
+
+    try {
+        return parseAndValidateReviewSentiment(content, reviews, "Gemini");
+    } catch (error) {
+        if (error instanceof ReviewSentimentValidationError) {
+            throw new GeminiError(error.message, true);
+        }
+        throw error;
+    }
+}
+
 export async function suggestProductImprovementsWithGemini(
     apiKey: string,
     model: string,
     market: Market,
-    product: ScrapedProduct
+    product: ProductOptimizationProduct
 ): Promise<ProductSuggestions> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
@@ -321,4 +434,25 @@ export async function translateProductContentWithGemini(
     }
 
     throw new GeminiError("Gemini translation request failed unexpectedly");
+}
+
+export async function analyzeReviewSentimentWithGemini(
+    apiKey: string,
+    model: string,
+    market: Market,
+    reviews: ProductReviews
+): Promise<ReviewSentimentAnalysis> {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+        try {
+            return await requestReviewSentiment(apiKey, model, market, reviews);
+        } catch (error) {
+            if (!(error instanceof GeminiError) || !error.retryable || attempt === MAX_ATTEMPTS) {
+                throw error;
+            }
+
+            console.warn(`    ${error.message}. Retrying immediately...`);
+        }
+    }
+
+    throw new GeminiError("Gemini review-sentiment request failed unexpectedly");
 }

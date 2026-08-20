@@ -19,26 +19,28 @@ Review Genius processes a list of Amazon ASINs grouped by market and produces an
 For each product, the tool:
 
 1. Fetches the localized Amazon product page.
-2. Extracts the title, feature bullets, description, product image, overall rating, and total review count. It then builds a corpus of up to 30 recent reviews, deliberately adding recent 1–3-star feedback so customer concerns are represented alongside praise.
-3. Sends the complete product and review context to the configured AI provider: DeepSeek or Gemini.
-4. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
-5. Makes a separate, faithful translation pass over the original listing, proposed listing, and extracted reviews so an international client can inspect every market in English without weakening the optimization prompt.
-6. Builds a self-contained React report with market/product navigation, on-demand English translations, comparisons, character counts, copy controls, review context, and light/dark themes.
-7. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback; the new suggestion's English translation is refreshed at the same time.
+2. Extracts the title, feature bullets, description, product image, overall rating, and total review count. It then builds a corpus of up to 30 reviews no older than one year, deliberately adding recent 1–3-star feedback so customer concerns are represented alongside praise.
+3. Captures each review's Amazon helpful-vote count, then asks the configured AI provider—DeepSeek or Gemini—to classify every review as positive or negative and create positive, negative, and overall English sentiment summaries. Helpful votes weight recurring themes, while the full-listing rating and count anchor the overall synthesis.
+4. Sends the original listing and those three summaries—not every review body—to the optimization model, limiting noise while preserving the evidence most useful for copy decisions.
+5. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
+6. Makes a separate, faithful translation pass over the original listing, proposed listing, and extracted reviews so an international client can inspect every market in English without weakening the optimization prompt.
+7. Builds a self-contained React report with market/product navigation, sentiment views, on-demand English translations, comparisons, character counts, copy controls, and light/dark themes.
+8. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback; the new suggestion's English translation is refreshed at the same time.
 
 ```mermaid
 flowchart LR
     A[Market + ASIN input] --> B[Serialized Amazon browser collection]
-    B --> C[Recent + critical review corpus]
-    C --> D[AI listing optimization]
-    D --> E[AI English translation]
-    E --> F[Validated JSON output]
-    F --> G[Self-contained HTML report]
-    G --> H[Optional browser feedback refinement + translation]
-    H --> G
+    B --> C[Reviews up to one year old + helpful votes]
+    C --> D[AI sentiment classification + summaries]
+    D --> E[AI listing optimization from summaries]
+    E --> F[AI English translation]
+    F --> G[Validated JSON output]
+    G --> H[Self-contained HTML report]
+    H --> I[Optional browser feedback refinement + translation]
+    I --> H
 ```
 
-All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while recent review corpora are refreshed after 24 hours. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
+All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while review corpora are never reused beyond 24 hours and are refreshed sooner when the calendar-day cutoff advances. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
 
 ## Report preview
 
@@ -161,7 +163,7 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated AI suggestions and English translations, and generates the website. Translation cache metadata covers the exact original copy, proposed copy, and review corpus, so changing any of them refreshes the translation without re-scraping otherwise current Amazon data. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website. Reviews without a parsed date and reviews before the build's one-year cutoff are excluded rather than sent to the AI or stored in the new corpus. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
 
 The build produces exactly two deliverables:
 
@@ -178,7 +180,7 @@ open output/Smartbox_2026.html
 
 ### Refine a suggestion in the report
 
-For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, reviews, current suggestions, and additional feedback to the provider and model selected during the build. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
+For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, persisted sentiment summaries, current suggestions, and additional feedback to the provider and model selected during the build. Individual review bodies are not included in this optimization request. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
 
 The refined title, features, description, English rationales, and English translations replace the displayed proposal as one unit. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `output/Smartbox_2026.json`.
 
@@ -192,7 +194,7 @@ The prompt is designed around several principles:
 -   **Four shopper decisions.** Copy is organized around recognition, relevance, confidence, and desire.
 -   **Search intent before arbitrary brevity.** Titles respect Amazon's general 200-character limit. A compact title remains preferable, but source-supported product, occasion, recipient, and long-tail search phrases are retained when their discovery value outweighs a soft display-length preference.
 -   **One coordinated listing.** The title, feature list, and description are planned together. Important information moved out of one field must remain in the most useful destination, and each rationale identifies meaningful cross-field moves.
--   **Reviews as prioritization signals.** Up to 30 recent reviews—and deliberate recent 1–3-star coverage—help surface customer vocabulary, valued benefits, uncertainties, and objections. The prompt explicitly treats this as a qualitative corpus rather than a representative rating distribution, and never treats review claims as verified product facts.
+-   **Review synthesis as a prioritization signal.** The optimization request receives the positive, negative, and overall sentiment summaries rather than individual comments. This keeps the context focused on valued benefits, uncertainties, and objections without allowing a long or colorful review to dominate the listing plan.
 -   **No invented claims.** Suggested benefits must follow conservatively from facts already present in the listing.
 -   **Language separation.** Suggested listing copy remains in the source market language; concise editorial reasoning is returned in English.
 -   **Auditable output.** Each rationale explains its field in the context of the complete proposal, names concrete changes or information movements, and states the expected improvement to discoverability, comprehension, confidence, or conversion.
@@ -200,6 +202,18 @@ The prompt is designed around several principles:
 DeepSeek runs in high-effort thinking mode, while Gemini uses its native structured-output format. Both providers pass through the same deterministic validation, which rejects malformed responses, unchanged fields, titles over the current limit, invalid feature counts, and complacent reasoning. Failed validations are retried before anything is saved.
 
 The provider and model are stored with every generated suggestion. Changing the provider, model, or prompt version invalidates only cached AI suggestions; previously scraped Amazon data remains reusable.
+
+## The review sentiment prompt
+
+Review analysis uses its own versioned contract in [`src/prompts/review-sentiment.ts`](src/prompts/review-sentiment.ts). It classifies every eligible extracted review as positive or negative and produces three concise English summaries:
+
+-   The **positive summary** synthesizes decision-relevant praise.
+-   The **negative summary** synthesizes objections, uncertainty, and friction.
+-   The **overall summary** reconciles those recent qualitative themes with Amazon's aggregate rating and total review count.
+
+Helpful votes act as an evidence-weight signal: themes in reviews that customers found useful receive more consideration, but a single highly voted review cannot erase corroborating or conflicting evidence. The prompt also makes clear that the deliberately balanced extracted corpus is not a representative rating sample, so its positive/negative split must not be presented as marketplace prevalence. Review claims remain customer perceptions rather than verified product facts.
+
+The report displays the overall synthesis beside Amazon's aggregate metrics. Positive and negative tabs show their respective summaries first, followed by the classified reviews sorted by helpful-vote count and then recency. Reviews older than the one-year collection cutoff never enter this analysis.
 
 ## The translation prompt
 

@@ -1,13 +1,21 @@
 import {
+    analyzeReviewSentimentWithDeepSeek,
     DEEPSEEK_MODEL,
     suggestProductImprovementsWithDeepSeek,
     translateProductContentWithDeepSeek
 } from "./deepseek.js";
-import { suggestProductImprovementsWithGemini, translateProductContentWithGemini } from "./gemini.js";
+import {
+    analyzeReviewSentimentWithGemini,
+    suggestProductImprovementsWithGemini,
+    translateProductContentWithGemini
+} from "./gemini.js";
 import {
     type Market,
     type ProductEnglishTranslations,
+    type ProductOptimizationProduct,
+    type ProductReviews,
     type ProductSuggestions,
+    type ReviewSentimentAnalysis,
     type ScrapedProduct,
     type SuggestionProvider
 } from "./schemas.js";
@@ -17,7 +25,8 @@ export type SuggestionService = {
     providerName: "DeepSeek" | "Gemini";
     model: string;
     reportConfig: ReportAiConfig;
-    suggest: (market: Market, product: ScrapedProduct) => Promise<ProductSuggestions>;
+    suggest: (market: Market, product: ProductOptimizationProduct) => Promise<ProductSuggestions>;
+    analyzeReviews: (market: Market, reviews: ProductReviews) => Promise<ReviewSentimentAnalysis>;
     translate: (
         market: Market,
         product: ScrapedProduct,
@@ -62,6 +71,8 @@ export function createSuggestionService(
             providerName: reportConfig.providerName,
             model: reportConfig.model,
             reportConfig,
+            analyzeReviews: (market, reviews) =>
+                analyzeReviewSentimentWithDeepSeek(deepSeekApiKey, market, reviews),
             suggest: (market, product) =>
                 suggestProductImprovementsWithDeepSeek(deepSeekApiKey, market, product),
             translate: (market, product, suggestions) =>
@@ -94,6 +105,8 @@ export function createSuggestionService(
             providerName: reportConfig.providerName,
             model: reportConfig.model,
             reportConfig,
+            analyzeReviews: (market, reviews) =>
+                analyzeReviewSentimentWithGemini(geminiApiKey, model, market, reviews),
             suggest: (market, product) =>
                 suggestProductImprovementsWithGemini(geminiApiKey, model, market, product),
             translate: (market, product, suggestions) =>

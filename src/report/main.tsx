@@ -19,14 +19,18 @@ import {
     Star,
     Sun,
     Tag,
+    ThumbsDown,
+    ThumbsUp,
     UsersRound
 } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReportAiConfig } from "../ai.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "../prompts/product-optimization.js";
+import { createReviewKey } from "../review-key.js";
 import {
     refinedSuggestionsSchema,
+    SENTIMENT_PROMPT_VERSION,
     TRANSLATION_PROMPT_VERSION,
     type ListingEnglishTranslations,
     type Market,
@@ -34,6 +38,9 @@ import {
     type ProductReviews,
     type ProductSuggestions,
     type RefinedSuggestions,
+    type Review,
+    type ReviewSentiment,
+    type ReviewSentimentAnalysis,
     type ScrapedProduct
 } from "../schemas.js";
 import { Badge } from "./components/ui/badge.js";
@@ -49,6 +56,7 @@ import { regenerateSuggestions } from "./regenerate-suggestions.js";
 type Product = ScrapedProduct & {
     suggestionPromptVersion?: number;
     suggestions?: ProductSuggestions;
+    reviewSentiment?: ReviewSentimentAnalysis;
     englishTranslations?: ProductEnglishTranslations;
     displayedSuggestionEnglishTranslations?: ListingEnglishTranslations;
 };
@@ -67,6 +75,7 @@ const REFINEMENT_STORAGE_KEY = [
     "review-genius-refinements",
     reportTitle,
     PRODUCT_OPTIMIZATION_PROMPT_VERSION,
+    SENTIMENT_PROMPT_VERSION,
     TRANSLATION_PROMPT_VERSION,
     reportAiConfig.provider,
     reportAiConfig.model
@@ -551,10 +560,15 @@ function SuggestionRegenerator({
         setError(undefined);
 
         try {
+            if (!product.reviewSentiment) {
+                throw new Error(
+                    "Review sentiment analysis is unavailable for this product. Rebuild the report before regenerating suggestions."
+                );
+            }
             const refinement = await regenerateSuggestions(
                 reportAiConfig,
                 market,
-                product,
+                { ...product, reviewSentiment: product.reviewSentiment },
                 product.suggestions,
                 additionalFeedback
             );
@@ -704,12 +718,197 @@ function PendingSuggestions() {
     );
 }
 
+type ReviewEntry = {
+    index: number;
+    review: Review;
+    sentiment: ReviewSentiment;
+    translation?: ProductEnglishTranslations["reviews"][number];
+};
+
+function sortReviewsByEvidence(entries: ReviewEntry[]): ReviewEntry[] {
+    return [...entries].sort((left, right) => {
+        const helpfulDifference = right.review.helpfulCount - left.review.helpfulCount;
+        if (helpfulDifference !== 0) return helpfulDifference;
+
+        if (left.review.date !== right.review.date) {
+            if (left.review.date === null) return 1;
+            if (right.review.date === null) return -1;
+            return right.review.date.localeCompare(left.review.date);
+        }
+
+        return left.index - right.index;
+    });
+}
+
+function ReviewCard({ entry, languageTag }: { entry: ReviewEntry; languageTag: string }) {
+    const { review, translation, sentiment, index } = entry;
+    const helpfulLabel = `${review.helpfulCount.toLocaleString("en")} ${
+        review.helpfulCount === 1 ? "person" : "people"
+    } found this helpful`;
+
+    return (
+        <Card key={review.id ?? `${index}-${review.comment}`} className="gap-4 py-5">
+            <CardHeader className="px-5">
+                <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <RatingStars rating={review.rating} />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                                variant="outline"
+                                className={cn(
+                                    sentiment === "positive"
+                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                        : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
+                                )}
+                            >
+                                {sentiment === "positive" ? <ThumbsUp /> : <ThumbsDown />}
+                                {sentiment === "positive" ? "Positive" : "Negative"}
+                            </Badge>
+                            <Badge variant="outline">{review.rating}/5</Badge>
+                            {review.verifiedPurchase && (
+                                <Badge variant="secondary">Verified purchase</Badge>
+                            )}
+                            <CopyButton
+                                value={[review.title, review.comment]
+                                    .filter((value): value is string => Boolean(value))
+                                    .join("\n\n")}
+                                label="Copy this review"
+                            />
+                        </div>
+                    </div>
+                    {review.title && (
+                        <CardTitle
+                            lang={review.sourceLanguage ?? languageTag}
+                            className="text-base leading-6"
+                        >
+                            {review.title}
+                        </CardTitle>
+                    )}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 font-medium text-foreground/70">
+                            <ThumbsUp className="size-3.5" /> {helpfulLabel}
+                        </span>
+                        {(review.dateText || review.variant) && (
+                            <span
+                                lang={review.sourceLanguage ?? languageTag}
+                                className="flex flex-wrap gap-x-3 gap-y-1"
+                            >
+                                {review.dateText && <span>{review.dateText}</span>}
+                                {review.variant && <span>{review.variant}</span>}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent
+                lang={review.sourceLanguage ?? languageTag}
+                className="px-5 text-sm leading-6 text-muted-foreground"
+            >
+                “{review.comment}”
+            </CardContent>
+            {translation && (
+                <div className="px-5">
+                    <EnglishTranslationReveal>
+                        <div className="space-y-2">
+                            {translation.title && (
+                                <p className="font-semibold text-foreground/75 not-italic">
+                                    {translation.title}
+                                </p>
+                            )}
+                            {(translation.dateText || translation.variant) && (
+                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                                    {translation.dateText && <span>{translation.dateText}</span>}
+                                    {translation.variant && <span>{translation.variant}</span>}
+                                </div>
+                            )}
+                            <p>“{translation.comment}”</p>
+                        </div>
+                    </EnglishTranslationReveal>
+                </div>
+            )}
+        </Card>
+    );
+}
+
+function SentimentReviewPanel({
+    sentiment,
+    summary,
+    entries,
+    languageTag
+}: {
+    sentiment: ReviewSentiment;
+    summary: string;
+    entries: ReviewEntry[];
+    languageTag: string;
+}) {
+    const positive = sentiment === "positive";
+
+    return (
+        <div className="space-y-4">
+            <Card
+                className={cn(
+                    positive
+                        ? "border-emerald-500/25 bg-emerald-500/[0.035]"
+                        : "border-red-500/25 bg-red-500/[0.035]"
+                )}
+            >
+                <CardHeader>
+                    <div className="flex items-center gap-2">
+                        <span
+                            className={cn(
+                                "flex size-8 items-center justify-center rounded-lg",
+                                positive
+                                    ? "bg-emerald-500/10 text-emerald-600"
+                                    : "bg-red-500/10 text-red-600"
+                            )}
+                        >
+                            {positive ? (
+                                <ThumbsUp className="size-4" />
+                            ) : (
+                                <ThumbsDown className="size-4" />
+                            )}
+                        </span>
+                        <CardTitle>
+                            {positive ? "Positive review summary" : "Negative review summary"}
+                        </CardTitle>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <p lang="en" className="text-sm leading-7 text-muted-foreground">
+                        {summary}
+                    </p>
+                </CardContent>
+            </Card>
+
+            {entries.length > 0 ? (
+                <div className="max-h-[760px] space-y-4 overflow-y-auto pr-1">
+                    {entries.map(entry => (
+                        <ReviewCard
+                            key={entry.review.id ?? `${entry.index}-${entry.review.comment}`}
+                            entry={entry}
+                            languageTag={languageTag}
+                        />
+                    ))}
+                </div>
+            ) : (
+                <Card className="border-dashed">
+                    <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                        No {sentiment} reviews were present in the eligible extracted corpus.
+                    </CardContent>
+                </Card>
+            )}
+        </div>
+    );
+}
+
 function ReviewsView({
     reviews,
+    sentimentAnalysis,
     translations,
     languageTag
 }: {
     reviews: ProductReviews;
+    sentimentAnalysis?: ReviewSentimentAnalysis;
     translations?: ProductEnglishTranslations["reviews"];
     languageTag: string;
 }) {
@@ -721,6 +920,23 @@ function ReviewsView({
               new Date(reviews.collection.collectedAt)
           )
         : undefined;
+    const sentimentByReviewKey = new Map(
+        sentimentAnalysis?.classifications.map(classification => [
+            classification.reviewKey,
+            classification.sentiment
+        ]) ?? []
+    );
+    const entries = reviews.items.flatMap((review, index): ReviewEntry[] => {
+        const sentiment = sentimentByReviewKey.get(createReviewKey(review, index));
+        return sentiment ? [{ index, review, sentiment, translation: translations?.[index] }] : [];
+    });
+    const positiveEntries = sortReviewsByEvidence(
+        entries.filter(entry => entry.sentiment === "positive")
+    );
+    const negativeEntries = sortReviewsByEvidence(
+        entries.filter(entry => entry.sentiment === "negative")
+    );
+    const defaultSentiment = positiveEntries.length > 0 ? "positive" : "negative";
 
     return (
         <div className="space-y-6">
@@ -728,123 +944,95 @@ function ReviewsView({
                 <CardHeader>
                     <CardTitle>Review overview</CardTitle>
                     <CardDescription>
-                        Aggregate data shown by Amazon. The AI corpus contains {reviews.items.length}{" "}
-                        recent-first reviews
+                        Aggregate data shown by Amazon. The qualitative AI corpus contains{" "}
+                        {reviews.items.length} reviews no older than one year
                         {criticalCoverage > 0
                             ? `, including ${criticalCoverage} added for 1–3-star concern coverage`
                             : ""}
                         .
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="grid gap-4 sm:grid-cols-2">
-                    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
-                        <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                            Amazon overall rating
-                        </span>
-                        <span className="mt-3 text-5xl font-bold tracking-tight">
-                            {reviews.overallRating.toFixed(1)}
-                            <span className="text-xl text-muted-foreground">/5</span>
-                        </span>
-                        <RatingStars rating={reviews.overallRating} />
+                <CardContent className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
+                            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                                Amazon overall rating
+                            </span>
+                            <span className="mt-3 text-5xl font-bold tracking-tight">
+                                {reviews.overallRating.toFixed(1)}
+                                <span className="text-xl text-muted-foreground">/5</span>
+                            </span>
+                            <RatingStars rating={reviews.overallRating} />
+                        </div>
+                        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
+                            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                                Total review count
+                            </span>
+                            <span className="mt-3 text-5xl font-bold tracking-tight">
+                                {reviews.totalCount.toLocaleString("en")}
+                            </span>
+                            <span className="mt-1 inline-flex items-center gap-2 text-sm text-muted-foreground">
+                                <UsersRound className="size-4" /> Amazon customer reviews
+                            </span>
+                        </div>
                     </div>
-                    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
-                        <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                            Total review count
-                        </span>
-                        <span className="mt-3 text-5xl font-bold tracking-tight">
-                            {reviews.totalCount.toLocaleString("en")}
-                        </span>
-                        <span className="mt-1 inline-flex items-center gap-2 text-sm text-muted-foreground">
-                            <UsersRound className="size-4" /> Amazon customer reviews
-                        </span>
+
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+                        <p className="mb-2 text-xs font-semibold tracking-widest text-primary uppercase">
+                            Overall sentiment
+                        </p>
+                        <p lang="en" className="text-sm leading-7 text-muted-foreground">
+                            {sentimentAnalysis?.overallSummary ??
+                                "Sentiment analysis is not available for this product yet."}
+                        </p>
                     </div>
                 </CardContent>
             </Card>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-                {reviews.items.map((review, index) => {
-                    const translation = translations?.[index];
-
-                    return (
-                        <Card key={review.id ?? `${index}-${review.comment}`} className="gap-4 py-5">
-                            <CardHeader className="px-5">
-                                <div className="space-y-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                        <RatingStars rating={review.rating} />
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <Badge variant="outline">{review.rating}/5</Badge>
-                                            {review.selectionReason === "critical" && (
-                                                <Badge variant="secondary">Concern coverage</Badge>
-                                            )}
-                                            {review.verifiedPurchase && (
-                                                <Badge variant="secondary">Verified purchase</Badge>
-                                            )}
-                                            <CopyButton
-                                                value={[review.title, review.comment]
-                                                    .filter((value): value is string => Boolean(value))
-                                                    .join("\n\n")}
-                                                label="Copy this review"
-                                            />
-                                        </div>
-                                    </div>
-                                    {review.title && (
-                                        <CardTitle
-                                            lang={review.sourceLanguage ?? languageTag}
-                                            className="text-base leading-6"
-                                        >
-                                            {review.title}
-                                        </CardTitle>
-                                    )}
-                                    {(review.dateText || review.variant) && (
-                                        <div
-                                            lang={review.sourceLanguage ?? languageTag}
-                                            className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                                        >
-                                            {review.dateText && <span>{review.dateText}</span>}
-                                            {review.variant && <span>{review.variant}</span>}
-                                        </div>
-                                    )}
-                                </div>
-                            </CardHeader>
-                            <CardContent
-                                lang={review.sourceLanguage ?? languageTag}
-                                className="px-5 text-sm leading-6 text-muted-foreground"
-                            >
-                                “{review.comment}”
-                            </CardContent>
-                            {translation && (
-                                <div className="px-5">
-                                    <EnglishTranslationReveal>
-                                        <div className="space-y-2">
-                                            {translation.title && (
-                                                <p className="font-semibold text-foreground/75 not-italic">
-                                                    {translation.title}
-                                                </p>
-                                            )}
-                                            {(translation.dateText || translation.variant) && (
-                                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                                                    {translation.dateText && (
-                                                        <span>{translation.dateText}</span>
-                                                    )}
-                                                    {translation.variant && (
-                                                        <span>{translation.variant}</span>
-                                                    )}
-                                                </div>
-                                            )}
-                                            <p>“{translation.comment}”</p>
-                                        </div>
-                                    </EnglishTranslationReveal>
-                                </div>
-                            )}
-                        </Card>
-                    );
-                })}
-            </div>
+            {sentimentAnalysis && (
+                <Tabs defaultValue={defaultSentiment}>
+                    <TabsList className="grid w-full grid-cols-2 sm:w-[470px]">
+                        <TabsTrigger value="positive" aria-label="Positive sentiment reviews">
+                            <ThumbsUp />
+                            <span>
+                                Positive sentiment<span className="hidden sm:inline"> reviews</span> (
+                                {positiveEntries.length})
+                            </span>
+                        </TabsTrigger>
+                        <TabsTrigger value="negative" aria-label="Negative sentiment reviews">
+                            <ThumbsDown />
+                            <span>
+                                Negative sentiment<span className="hidden sm:inline"> reviews</span> (
+                                {negativeEntries.length})
+                            </span>
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="positive" className="mt-4">
+                        <SentimentReviewPanel
+                            sentiment="positive"
+                            summary={sentimentAnalysis.positiveSummary}
+                            entries={positiveEntries}
+                            languageTag={languageTag}
+                        />
+                    </TabsContent>
+                    <TabsContent value="negative" className="mt-4">
+                        <SentimentReviewPanel
+                            sentiment="negative"
+                            summary={sentimentAnalysis.negativeSummary}
+                            entries={negativeEntries}
+                            languageTag={languageTag}
+                        />
+                    </TabsContent>
+                </Tabs>
+            )}
 
             <p className="text-center text-xs text-muted-foreground">
                 Review corpus collected with the recent-balanced strategy
-                {collectedAt ? ` on ${collectedAt}` : ""}; aggregate totals remain Amazon's full-listing
-                figures.
+                {collectedAt ? ` on ${collectedAt}` : ""}
+                {reviews.collection.reviewCutoffDate
+                    ? `; reviews before ${reviews.collection.reviewCutoffDate} were excluded`
+                    : ""}
+                . Aggregate totals remain Amazon's full-listing figures.
             </p>
         </div>
     );
@@ -1241,6 +1429,7 @@ function App() {
                             <TabsContent value="reviews" className="mt-6">
                                 <ReviewsView
                                     reviews={product.reviews}
+                                    sentimentAnalysis={product.reviewSentiment}
                                     translations={product.englishTranslations?.reviews}
                                     languageTag={marketMetadata[group.market].languageTag}
                                 />

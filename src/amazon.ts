@@ -3,7 +3,7 @@ import path from "node:path";
 import { load } from "cheerio";
 import { createAmazonPage, waitForAmazonAccess } from "./amazon-browser.js";
 import { amazonMarketplaces, getAmazonProductUrl } from "./amazon-marketplaces.js";
-import { collectAmazonReviews } from "./amazon-reviews.js";
+import { collectAmazonReviews, parseHelpfulVoteCount } from "./amazon-reviews.js";
 import { runExternalRequest } from "./external-request.js";
 import type { Market, ScrapedProduct } from "./schemas.js";
 
@@ -271,6 +271,13 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
             variant: cleanText(review.find('[data-hook="format-strip"]').first().text()) || null,
             sourceLanguage:
                 review.attr("data-sourcelanguage") ?? review.find("[lang]").first().attr("lang") ?? null,
+            helpfulCount: parseHelpfulVoteCount(
+                review
+                    .find('[data-hook="helpful-vote-statement"], .cr-vote-text')
+                    .first()
+                    .attr("aria-label") ??
+                    review.find('[data-hook="helpful-vote-statement"], .cr-vote-text').first().text()
+            ),
             selectionReason: "embedded-top"
         });
         seenReviews.add(identity);
@@ -287,6 +294,7 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
             pagesVisited: 0,
             complete: false,
             scraperVersion: 1,
+            reviewCutoffDate: null,
             corpusHash: null
         }
     };

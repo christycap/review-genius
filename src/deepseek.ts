@@ -9,9 +9,20 @@ import {
     PRODUCT_OPTIMIZATION_SYSTEM_PROMPT
 } from "./prompts/product-optimization.js";
 import {
+    createReviewSentimentUserPrompt,
+    REVIEW_SENTIMENT_SYSTEM_PROMPT
+} from "./prompts/review-sentiment.js";
+import {
+    parseAndValidateReviewSentiment,
+    ReviewSentimentValidationError
+} from "./review-sentiment-validation.js";
+import {
     type Market,
     type ProductEnglishTranslations,
+    type ProductOptimizationProduct,
+    type ProductReviews,
     type ProductSuggestions,
+    type ReviewSentimentAnalysis,
     type ScrapedProduct
 } from "./schemas.js";
 import { parseAndValidateSuggestions, SuggestionValidationError } from "./suggestion-validation.js";
@@ -56,7 +67,7 @@ function getApiErrorMessage(value: unknown, status: number): string {
 async function requestSuggestions(
     apiKey: string,
     market: Market,
-    product: ScrapedProduct
+    product: ProductOptimizationProduct
 ): Promise<ProductSuggestions> {
     let response: Response;
     let responseText: string;
@@ -231,10 +242,95 @@ async function requestTranslations(
     }
 }
 
+async function requestReviewSentiment(
+    apiKey: string,
+    market: Market,
+    reviews: ProductReviews
+): Promise<ReviewSentimentAnalysis> {
+    let response: Response;
+    let responseText: string;
+
+    try {
+        ({ response, responseText } = await runExternalRequest(async () => {
+            const response = await fetch(DEEPSEEK_URL, {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${apiKey}`,
+                    "content-type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: DEEPSEEK_MODEL,
+                    thinking: { type: "enabled" },
+                    reasoning_effort: "high",
+                    messages: [
+                        { role: "system", content: REVIEW_SENTIMENT_SYSTEM_PROMPT },
+                        {
+                            role: "user",
+                            content: createReviewSentimentUserPrompt(market, reviews)
+                        }
+                    ],
+                    response_format: { type: "json_object" },
+                    max_tokens: 8_192
+                }),
+                signal: AbortSignal.timeout(240_000)
+            });
+
+            return { response, responseText: await response.text() };
+        }));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new DeepSeekError(`DeepSeek review-sentiment request failed: ${message}`, true);
+    }
+
+    let responseValue: unknown;
+    try {
+        responseValue = JSON.parse(responseText);
+    } catch {
+        throw new DeepSeekError(
+            response.ok
+                ? "DeepSeek returned a non-JSON review-sentiment API response"
+                : `DeepSeek returned HTTP ${response.status}`,
+            response.status === 429 || response.status >= 500
+        );
+    }
+
+    if (!response.ok) {
+        throw new DeepSeekError(
+            getApiErrorMessage(responseValue, response.status),
+            response.status === 408 || response.status === 429 || response.status >= 500
+        );
+    }
+
+    const completionResult = completionSchema.safeParse(responseValue);
+    if (!completionResult.success) {
+        throw new DeepSeekError(
+            `DeepSeek returned an unexpected review-sentiment API response: ${completionResult.error.message}`,
+            true
+        );
+    }
+
+    const choice = completionResult.data.choices[0];
+    if (choice.finish_reason !== "stop") {
+        throw new DeepSeekError(
+            `DeepSeek review sentiment stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
+            choice.finish_reason === "insufficient_system_resource"
+        );
+    }
+
+    try {
+        return parseAndValidateReviewSentiment(choice.message.content ?? "", reviews, "DeepSeek");
+    } catch (error) {
+        if (error instanceof ReviewSentimentValidationError) {
+            throw new DeepSeekError(error.message, true);
+        }
+        throw error;
+    }
+}
+
 export async function suggestProductImprovementsWithDeepSeek(
     apiKey: string,
     market: Market,
-    product: ScrapedProduct
+    product: ProductOptimizationProduct
 ): Promise<ProductSuggestions> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
@@ -270,4 +366,24 @@ export async function translateProductContentWithDeepSeek(
     }
 
     throw new DeepSeekError("DeepSeek translation request failed unexpectedly");
+}
+
+export async function analyzeReviewSentimentWithDeepSeek(
+    apiKey: string,
+    market: Market,
+    reviews: ProductReviews
+): Promise<ReviewSentimentAnalysis> {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+        try {
+            return await requestReviewSentiment(apiKey, market, reviews);
+        } catch (error) {
+            if (!(error instanceof DeepSeekError) || !error.retryable || attempt === MAX_ATTEMPTS) {
+                throw error;
+            }
+
+            console.warn(`    ${error.message}. Retrying immediately...`);
+        }
+    }
+
+    throw new DeepSeekError("DeepSeek review-sentiment request failed unexpectedly");
 }

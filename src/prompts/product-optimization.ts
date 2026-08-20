@@ -2,7 +2,7 @@
  * Prompt version is persisted with every product so prompt changes invalidate
  * cached suggestions without forcing Amazon product data to be fetched again.
  */
-export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 5 as const;
+export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 6 as const;
 export const AMAZON_TITLE_CHARACTER_LIMIT = 200;
 
 export const PRODUCT_SUGGESTIONS_JSON_SCHEMA = {
@@ -67,8 +67,36 @@ type ProductOptimizationContext = {
     title: string;
     productFeatures: string[];
     description: string;
-    reviews: unknown;
+    reviews: {
+        overallRating: number;
+        totalCount: number;
+        items: unknown[];
+        collection: { reviewCutoffDate: string | null };
+    };
+    reviewSentiment: {
+        overallSummary: string;
+        positiveSummary: string;
+        negativeSummary: string;
+    };
 };
+
+function createReviewInsights(product: ProductOptimizationContext): unknown {
+    return {
+        aggregate: {
+            overallRating: product.reviews.overallRating,
+            ratingScaleMaximum: 5,
+            totalReviewCount: product.reviews.totalCount
+        },
+        extractedCorpus: {
+            maximumReviewAge: "one year at collection time",
+            reviewCutoffDate: product.reviews.collection.reviewCutoffDate,
+            extractedReviewCount: product.reviews.items.length,
+            overallSentimentSummary: product.reviewSentiment.overallSummary,
+            positiveReviewSummary: product.reviewSentiment.positiveSummary,
+            negativeReviewSummary: product.reviewSentiment.negativeSummary
+        }
+    };
+}
 
 export function createProductOptimizationUserPrompt(
     market: string,
@@ -79,7 +107,7 @@ export function createProductOptimizationUserPrompt(
         title: product.title,
         productFeatures: product.productFeatures,
         description: product.description,
-        reviews: product.reviews
+        reviewInsights: createReviewInsights(product)
     })}`;
 }
 
@@ -101,7 +129,7 @@ ${JSON.stringify({
         title: product.title,
         productFeatures: product.productFeatures,
         description: product.description,
-        reviews: product.reviews
+        reviewInsights: createReviewInsights(product)
     },
     currentSuggestions,
     additionalFeedback
@@ -145,8 +173,8 @@ Return only a JSON object with exactly this shape:
 Rules:
 - Output language is field-specific: write the title, feature bullets, and description in the source listing language; write all three reasoning fields in English.
 - Use only facts present in the title, product features, or description. A benefit is allowed only when it follows directly and conservatively from an explicit product fact. Never invent specifications, quantities, certifications, rankings, guarantees, availability, prices, inclusions, locations, or outcomes.
-- Treat the aggregate rating and total count as context, not proof that the listing copy is effective. The extracted corpus contains up to 30 reviews: it prioritizes the newest available reviews and deliberately enriches the sample with recent 1–3-star reviews so objections are not hidden by Amazon's top-review selection. This is a qualitative decision-making corpus, not a representative rating distribution; never infer prevalence from the number of positive or negative extracted items.
-- Use repeated review themes, titles, dates, verified-purchase markers, and variant context cautiously to prioritize source-supported benefits, customer vocabulary, questions, and objections. Positive signals can reveal facts that deserve prominence; negative signals can reveal uncertainty that the listing should clarify. Never turn a reviewer's subjective statement or unverified detail into a product fact, and do not quote or closely copy review text.
+- Treat the aggregate rating and total count as population-level context, not proof that the listing copy is effective. The supplied qualitative sentiment summaries were produced from up to 30 reviews no older than one year, with deliberate recent 1–3-star coverage and helpful-vote weighting. The extracted corpus is not a representative rating distribution; never infer prevalence or percentages from its positive and negative themes.
+- Use the supplied overall, positive, and negative summaries cautiously to prioritize source-supported benefits, customer vocabulary, questions, and objections. Positive themes can reveal facts that deserve prominence; negative themes can reveal uncertainty that the listing should clarify. Never turn a summarized customer perception or unverified review detail into a product fact.
 
 Conversion framework distilled from current Amazon guidance and ecommerce usability research:
 - Optimize for four shopper decisions: recognition (what is it?), relevance (is it for me?), confidence (what exactly do I get and how does it work?), and desire (why is this experience worth choosing?).
@@ -154,7 +182,7 @@ Conversion framework distilled from current Amazon guidance and ecommerce usabil
 - Preserve important source facts and plausible search intent, but reorganize them when a different hierarchy makes the offer easier to discover, compare, and understand.
 - Treat searchability as a primary conversion input, not an afterthought. Identify source-supported phrases that express product type, use case, occasion, recipient, experience, location, duration, or principal inclusion. Existing phrases such as local-language gift, travel, occasion, or recipient queries may carry valuable long-tail intent; do not remove them merely because they sound broad or because a shorter title looks cleaner.
 - Before deleting or rewriting an existing natural search phrase, verify that the proposed listing still covers the same shopper intent with wording that is at least as relevant and specific. When the available evidence cannot establish that a replacement is better, preserve the source phrase naturally.
-- Reviews can reveal customer vocabulary and decision themes, but they are not keyword-volume data. Use only search terms supported by the listing facts, write them naturally, and never claim that a phrase is popular, high-volume, or proven to rank.
+- Review summaries can reveal customer vocabulary and decision themes, but they are not keyword-volume data. Use only search terms supported by the listing facts, write them naturally, and never claim that a phrase is popular, high-volume, or proven to rank.
 
 Whole-listing planning criteria:
 - Plan the title, feature list, and description together before writing any rationale. Silently create a coverage inventory of the important facts, shopper questions, objections, and source-supported search intents, then assign each item to the field where it works hardest.
@@ -181,7 +209,7 @@ Description criteria:
 Reasoning criteria:
 - Write the rationales only after finalizing all three suggested values. Each reasoning field must contain 2 to 4 concise English sentences that evaluate its field as part of the complete proposed listing, not in isolation.
 - Name the most important concrete changes and why they should improve discoverability, comprehension, confidence, or conversion. Every rationale must name at least one specific relationship to another proposed field. Explicitly identify meaningful information or search intent retained in that field, moved into it from a source field, or moved out of it and its proposed destination; for example, state that validity moved from a source feature into proposed feature 4 and is summarized in the description. Never use a vague statement such as "details remain elsewhere." If nothing moved, name the specific way the field complements another proposed field without unnecessary duplication.
-- Mention relevant review evidence when it materially influenced prioritization, but clearly frame it as a signal from the extracted reviews rather than a universal customer claim.
+- Mention relevant sentiment-summary evidence when it materially influenced prioritization, but clearly frame it as a qualitative signal rather than a universal customer claim.
 - Provide only a user-facing editorial rationale, never hidden chain-of-thought or step-by-step internal analysis.
 
 - Silently audit all three proposals against this framework before responding. The suggested values must be materially different from their source fields.

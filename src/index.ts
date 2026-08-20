@@ -7,7 +7,9 @@ import { isReviewCollectionCurrent } from "./amazon-reviews.js";
 import { fetchProduct } from "./amazon.js";
 import { DEEPSEEK_MODEL } from "./deepseek.js";
 import { generateReport } from "./report/generate-report.js";
+import { createReviewSentimentSourceHash } from "./review-sentiment-source.js";
 import {
+    SENTIMENT_PROMPT_VERSION,
     SUGGESTION_PROMPT_VERSION,
     TRANSLATION_PROMPT_VERSION,
     inputSchema,
@@ -123,6 +125,7 @@ async function readOutputFile(filePath: string): Promise<ExistingOutput | undefi
                                     pagesVisited: 0,
                                     complete: false,
                                     scraperVersion: 1,
+                                    reviewCutoffDate: null,
                                     corpusHash: null
                                 }
                             }
@@ -179,6 +182,22 @@ function hasCurrentSuggestions(product: StoredProduct, suggestionService: Sugges
         product.suggestionModel ?? (cachedProvider === "deepseek" ? DEEPSEEK_MODEL : undefined);
 
     return cachedProvider === suggestionService.provider && cachedModel === suggestionService.model;
+}
+
+function hasCurrentReviewSentiment(
+    product: StoredProduct,
+    suggestionService: SuggestionService
+): boolean {
+    if (
+        product.reviewSentiment === undefined ||
+        product.sentimentPromptVersion !== SENTIMENT_PROMPT_VERSION ||
+        product.sentimentProvider !== suggestionService.provider ||
+        product.sentimentModel !== suggestionService.model
+    ) {
+        return false;
+    }
+
+    return product.sentimentSourceHash === createReviewSentimentSourceHash(product.reviews);
 }
 
 function hasCurrentTranslations(product: StoredProduct, suggestionService: SuggestionService): boolean {
@@ -241,6 +260,7 @@ async function processDataset(
 
             if (
                 existingProduct !== undefined &&
+                hasCurrentReviewSentiment(existingProduct, suggestionService) &&
                 hasCurrentSuggestions(existingProduct, suggestionService) &&
                 hasCurrentTranslations(existingProduct, suggestionService) &&
                 !needsReviewRefresh
@@ -253,6 +273,15 @@ async function processDataset(
 
             try {
                 let scrapedProduct = existingProduct;
+                let productOutputIndex = existingIndex;
+                const setOutputProduct = (product: StoredProduct): void => {
+                    if (productOutputIndex === -1) {
+                        marketOutput.products.push(product);
+                        productOutputIndex = marketOutput.products.length - 1;
+                    } else {
+                        marketOutput.products[productOutputIndex] = product;
+                    }
+                };
 
                 if (scrapedProduct === undefined || needsReviewRefresh) {
                     const action = needsReviewRefresh
@@ -264,8 +293,51 @@ async function processDataset(
                     console.log(`  [${index + 1}/${asins.length}] ${asin}: using existing product data`);
                 }
 
+                const scrapedOnlyProduct: StoredProduct = {
+                    asin: scrapedProduct.asin,
+                    title: scrapedProduct.title,
+                    productFeatures: scrapedProduct.productFeatures,
+                    description: scrapedProduct.description,
+                    productImageUrl: scrapedProduct.productImageUrl,
+                    reviews: scrapedProduct.reviews
+                };
+                const sentimentSourceHash = createReviewSentimentSourceHash(scrapedProduct.reviews);
+                const canReuseReviewSentiment =
+                    existingProduct !== undefined &&
+                    hasCurrentReviewSentiment(existingProduct, suggestionService) &&
+                    existingProduct.sentimentSourceHash === sentimentSourceHash;
+                const reviewSentiment = canReuseReviewSentiment
+                    ? existingProduct.reviewSentiment!
+                    : await (async () => {
+                          setOutputProduct(scrapedOnlyProduct);
+                          await writeOutput(DATA_OUTPUT_PATH, output);
+                          console.log(
+                              `    Requesting ${suggestionService.providerName} review sentiment analysis...`
+                          );
+                          return suggestionService.analyzeReviews(market, scrapedProduct.reviews);
+                      })();
+
+                if (canReuseReviewSentiment) {
+                    console.log(
+                        "    Review evidence is unchanged; keeping the existing sentiment analysis"
+                    );
+                }
+
+                const analyzedProduct: StoredProduct & {
+                    reviewSentiment: NonNullable<StoredProduct["reviewSentiment"]>;
+                } = {
+                    ...scrapedOnlyProduct,
+                    reviewSentiment,
+                    sentimentPromptVersion: SENTIMENT_PROMPT_VERSION,
+                    sentimentProvider: suggestionService.provider,
+                    sentimentModel: suggestionService.model,
+                    sentimentSourceHash
+                };
+                setOutputProduct(analyzedProduct);
+
                 const canReuseSuggestions =
                     existingProduct !== undefined &&
+                    canReuseReviewSentiment &&
                     hasCurrentSuggestions(existingProduct, suggestionService) &&
                     existingProduct.reviews.collection.corpusHash !== null &&
                     existingProduct.reviews.collection.corpusHash ===
@@ -273,15 +345,16 @@ async function processDataset(
                 const suggestions = canReuseSuggestions
                     ? existingProduct.suggestions!
                     : await (async () => {
+                          await writeOutput(DATA_OUTPUT_PATH, output);
                           console.log(`    Requesting ${suggestionService.providerName} suggestions...`);
-                          return suggestionService.suggest(market, scrapedProduct);
+                          return suggestionService.suggest(market, analyzedProduct);
                       })();
 
                 if (canReuseSuggestions) {
                     console.log("    Review corpus is unchanged; keeping the existing suggestions");
                 }
 
-                const translationSourceHash = createTranslationSourceHash(scrapedProduct, suggestions);
+                const translationSourceHash = createTranslationSourceHash(analyzedProduct, suggestions);
                 const canReuseTranslations =
                     existingProduct !== undefined &&
                     existingProduct.englishTranslations !== undefined &&
@@ -290,23 +363,14 @@ async function processDataset(
                     existingProduct.translationModel === suggestionService.model &&
                     existingProduct.translationSourceHash === translationSourceHash;
                 const suggestionProduct: StoredProduct = {
-                    asin: scrapedProduct.asin,
-                    title: scrapedProduct.title,
-                    productFeatures: scrapedProduct.productFeatures,
-                    description: scrapedProduct.description,
-                    productImageUrl: scrapedProduct.productImageUrl,
-                    reviews: scrapedProduct.reviews,
+                    ...analyzedProduct,
                     suggestions,
                     suggestionPromptVersion: SUGGESTION_PROMPT_VERSION,
                     suggestionProvider: suggestionService.provider,
                     suggestionModel: suggestionService.model
                 };
 
-                if (existingIndex === -1) {
-                    marketOutput.products.push(suggestionProduct);
-                } else {
-                    marketOutput.products[existingIndex] = suggestionProduct;
-                }
+                setOutputProduct(suggestionProduct);
 
                 let completedProduct: StoredProduct;
                 if (canReuseTranslations) {
@@ -330,7 +394,7 @@ async function processDataset(
                     );
                     const englishTranslations = await suggestionService.translate(
                         market,
-                        scrapedProduct,
+                        analyzedProduct,
                         suggestions
                     );
                     completedProduct = {
@@ -343,11 +407,7 @@ async function processDataset(
                     };
                 }
 
-                if (existingIndex === -1) {
-                    marketOutput.products[marketOutput.products.length - 1] = completedProduct;
-                } else {
-                    marketOutput.products[existingIndex] = completedProduct;
-                }
+                setOutputProduct(completedProduct);
 
                 await writeOutput(DATA_OUTPUT_PATH, output);
                 console.log(

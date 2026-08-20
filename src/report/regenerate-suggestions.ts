@@ -13,6 +13,7 @@ import {
 import type {
     ListingEnglishTranslations,
     Market,
+    ProductOptimizationProduct,
     ProductSuggestions,
     RefinedSuggestions,
     ScrapedProduct
@@ -175,7 +176,7 @@ async function fetchFromBrowser(
 async function requestDeepSeekSuggestions(
     config: ReportAiConfig,
     market: Market,
-    product: ScrapedProduct,
+    product: ProductOptimizationProduct,
     currentSuggestions: ProductSuggestions | undefined,
     feedback: string
 ): Promise<ProductSuggestions> {
@@ -233,7 +234,7 @@ async function requestDeepSeekSuggestions(
 async function requestGeminiSuggestions(
     config: ReportAiConfig,
     market: Market,
-    product: ScrapedProduct,
+    product: ProductOptimizationProduct,
     currentSuggestions: ProductSuggestions | undefined,
     feedback: string
 ): Promise<ProductSuggestions> {
@@ -450,7 +451,7 @@ async function retryBrowserRequest<T>(request: () => Promise<T>): Promise<T> {
 export async function regenerateSuggestions(
     config: ReportAiConfig,
     market: Market,
-    product: ScrapedProduct,
+    product: ProductOptimizationProduct,
     currentSuggestions: ProductSuggestions | undefined,
     feedback: string
 ): Promise<RefinedSuggestions> {

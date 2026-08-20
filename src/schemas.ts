@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { PRODUCT_TRANSLATION_PROMPT_VERSION } from "./prompts/english-translation.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "./prompts/product-optimization.js";
+import { REVIEW_SENTIMENT_PROMPT_VERSION } from "./prompts/review-sentiment.js";
 
 export const SUGGESTION_PROMPT_VERSION = PRODUCT_OPTIMIZATION_PROMPT_VERSION;
 export const TRANSLATION_PROMPT_VERSION = PRODUCT_TRANSLATION_PROMPT_VERSION;
+export const SENTIMENT_PROMPT_VERSION = REVIEW_SENTIMENT_PROMPT_VERSION;
 
 const asinSchema = z
     .string()
@@ -72,6 +74,7 @@ export const reviewSchema = z
         reviewedAsin: asinSchema.nullable().default(null),
         variant: z.string().nullable().default(null),
         sourceLanguage: z.string().min(1).nullable().default(null),
+        helpfulCount: z.number().int().nonnegative().default(0),
         selectionReason: reviewSelectionReasonSchema.default("embedded-top")
     })
     .strict();
@@ -84,6 +87,11 @@ export const reviewCollectionSchema = z
         pagesVisited: z.number().int().nonnegative(),
         complete: z.boolean(),
         scraperVersion: z.number().int().positive(),
+        reviewCutoffDate: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .nullable()
+            .default(null),
         corpusHash: z
             .string()
             .regex(/^[a-f0-9]{64}$/)
@@ -98,6 +106,7 @@ const legacyReviewCollection = {
     pagesVisited: 0,
     complete: false,
     scraperVersion: 1,
+    reviewCutoffDate: null,
     corpusHash: null
 };
 
@@ -145,6 +154,25 @@ export const suggestionsSchema = z
 
 export const suggestionProviderSchema = z.enum(["deepseek", "gemini"]);
 
+export const reviewSentimentSchema = z.enum(["positive", "negative"]);
+
+export const reviewSentimentAnalysisSchema = z
+    .object({
+        overallSummary: z.string().trim().min(1),
+        positiveSummary: z.string().trim().min(1),
+        negativeSummary: z.string().trim().min(1),
+        classifications: z.array(
+            z
+                .object({
+                    index: z.number().int().nonnegative(),
+                    reviewKey: z.string().min(1),
+                    sentiment: reviewSentimentSchema
+                })
+                .strict()
+        )
+    })
+    .strict();
+
 export const listingEnglishTranslationsSchema = z
     .object({
         title: z.string(),
@@ -184,6 +212,14 @@ export const storedProductSchema = scrapedProductSchema.extend({
     suggestionPromptVersion: z.number().int().positive().optional(),
     suggestionProvider: suggestionProviderSchema.optional(),
     suggestionModel: z.string().min(1).optional(),
+    reviewSentiment: reviewSentimentAnalysisSchema.optional(),
+    sentimentPromptVersion: z.number().int().positive().optional(),
+    sentimentProvider: suggestionProviderSchema.optional(),
+    sentimentModel: z.string().min(1).optional(),
+    sentimentSourceHash: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
     englishTranslations: productEnglishTranslationsSchema.optional(),
     translationPromptVersion: z.number().int().positive().optional(),
     translationProvider: suggestionProviderSchema.optional(),
@@ -199,6 +235,11 @@ export const productSchema = scrapedProductSchema.extend({
     suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION),
     suggestionProvider: suggestionProviderSchema,
     suggestionModel: z.string().min(1),
+    reviewSentiment: reviewSentimentAnalysisSchema,
+    sentimentPromptVersion: z.literal(SENTIMENT_PROMPT_VERSION),
+    sentimentProvider: suggestionProviderSchema,
+    sentimentModel: z.string().min(1),
+    sentimentSourceHash: z.string().regex(/^[a-f0-9]{64}$/),
     englishTranslations: productEnglishTranslationsSchema,
     translationPromptVersion: z.literal(TRANSLATION_PROMPT_VERSION),
     translationProvider: suggestionProviderSchema,
@@ -281,6 +322,11 @@ export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
 export type ProductReviews = z.infer<typeof productReviewsSchema>;
 export type Review = z.infer<typeof reviewSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
+export type ReviewSentiment = z.infer<typeof reviewSentimentSchema>;
+export type ReviewSentimentAnalysis = z.infer<typeof reviewSentimentAnalysisSchema>;
+export type ProductOptimizationProduct = ScrapedProduct & {
+    reviewSentiment: ReviewSentimentAnalysis;
+};
 export type ListingEnglishTranslations = z.infer<typeof listingEnglishTranslationsSchema>;
 export type ProductEnglishTranslations = z.infer<typeof productEnglishTranslationsSchema>;
 export type RefinedSuggestions = z.infer<typeof refinedSuggestionsSchema>;
