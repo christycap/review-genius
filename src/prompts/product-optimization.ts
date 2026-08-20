@@ -2,8 +2,9 @@
  * Prompt version is persisted with every product so prompt changes invalidate
  * cached suggestions without forcing Amazon product data to be fetched again.
  */
-export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 7 as const;
-export const AMAZON_TITLE_CHARACTER_LIMIT = 200;
+export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 8 as const;
+export const AMAZON_TITLE_CHARACTER_LIMIT = 75;
+export const AMAZON_TITLE_RECOMMENDED_CHARACTER_LENGTH = 60;
 
 export const PRODUCT_SUGGESTIONS_JSON_SCHEMA = {
     type: "object",
@@ -135,10 +136,11 @@ ${JSON.stringify({
 }
 
 /**
- * Editorial framework reviewed on 2026-08-14 and distilled from:
+ * Editorial framework reviewed on 2026-08-21 and distilled from:
  *
- * - Amazon's current title policy announcement:
- *   https://sellercentral.amazon.com/seller-forums/discussions/t/533f9cf7-3b5e-4974-b523-02e4a1a42c5f
+ * - Amazon's current European title policy announcements:
+ *   https://sellercentral.amazon.fr/seller-forums/discussions/t/8e52e72f-4329-48a4-8357-6da0ffb4cd0a
+ *   https://sellercentral.amazon.co.uk/seller-forums/discussions/t/33f0a42a-17f1-46ef-b110-ba7512a3c881
  * - Amazon's listing, keyword, bullet-point, and advertising guidance:
  *   https://sell.amazon.com/blog/amazon-product-listings
  *   https://sell.amazon.com/blog/amazon-keyword-research
@@ -189,8 +191,9 @@ Whole-listing planning criteria:
 - Draft and audit all three suggested values as one coordinated listing. Check that they complement one another, preserve factual coverage, answer the strongest review-informed questions, and do not create contradictions.
 
 Title criteria:
-- The suggested title must contain at most ${AMAZON_TITLE_CHARACTER_LIMIT} Unicode characters including spaces, reflecting Amazon's general title-policy limit for most categories.
-- Aim for a compact, scannable title. Approximately 60 characters can improve full-title visibility in some Amazon placements, but this is a soft display preference, not a hard target. A longer natural title is better when it preserves highly relevant search intent, product recognition, or purchase-decisive attributes.
+- Amazon's current non-media title policy requires no more than ${AMAZON_TITLE_CHARACTER_LIMIT} Unicode characters including spaces. Never exceed this compliance ceiling.
+- Treat approximately ${AMAZON_TITLE_RECOMMENDED_CHARACTER_LENGTH} characters as a strong working budget, reflecting Amazon's official recommendation for informative, scannable titles that are less likely to be truncated in Sponsored Products placements. Draft to fit this budget first; every character beyond it must earn its place.
+- The ${AMAZON_TITLE_RECOMMENDED_CHARACTER_LENGTH}-character target is a strong optimization incentive, not a hard minimum or maximum. Use the remaining space up to ${AMAZON_TITLE_CHARACTER_LIMIT} characters only when shortening further would remove essential product identity, a purchase-decisive attribute, or valuable source-supported search intent that cannot be expressed as clearly and naturally elsewhere in the coordinated listing. Never pad a title to reach the target, and never make it vague merely to stay near it.
 - Front-load the brand, recognizable product type, primary search phrase, and strongest differentiating facts. Move secondary detail into the feature list only after confirming that the coordinated listing retains the information and that moving it will not materially weaken discoverability.
 - Make the offer identifiable when scanned alone. Avoid promotional claims, repeated words, unnecessary punctuation, keyword chains, and details that do not help a shopper choose.
 

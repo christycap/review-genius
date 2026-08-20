@@ -192,7 +192,7 @@ The prompt is designed around several principles:
 
 -   **Conversion, not congratulations.** The selected model must materially improve every field and may not return an unchanged listing or claim that no work is needed.
 -   **Four shopper decisions.** Copy is organized around recognition, relevance, confidence, and desire.
--   **Search intent before arbitrary brevity.** Titles respect Amazon's general 200-character limit. A compact title remains preferable, but source-supported product, occasion, recipient, and long-tail search phrases are retained when their discovery value outweighs a soft display-length preference.
+-   **A 60-character working budget within the current 75-character ceiling.** Amazon recommends approximately 60 characters for informative, scannable titles and now limits non-media titles to 75 characters including spaces. The prompt strongly targets 60, while allowing the remaining budget when essential product identity, purchase-decisive detail, or valuable source-supported search intent genuinely warrants it.
 -   **One coordinated listing.** The title, feature list, and description are planned together. Important information moved out of one field must remain in the most useful destination, and each rationale identifies meaningful cross-field moves.
 -   **Review synthesis as a prioritization signal.** The optimization request receives the positive, negative, and overall sentiment summaries rather than individual comments. This keeps the context focused on valued benefits, uncertainties, and objections without allowing a long or colorful review to dominate the listing plan.
 -   **No invented claims.** Suggested benefits must follow conservatively from facts already present in the listing.
