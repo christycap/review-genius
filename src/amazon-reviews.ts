@@ -8,15 +8,13 @@ import { amazonMarketplaces } from "./amazon-marketplaces.js";
 import { runExternalRequest } from "./external-request.js";
 import { productReviewsSchema, type Market, type ProductReviews, type Review } from "./schemas.js";
 
-export const AMAZON_REVIEW_LIMIT = 30;
-export const AMAZON_REVIEW_SCRAPER_VERSION = 3;
+export const AMAZON_REVIEW_LIMIT = 100;
+export const AMAZON_REVIEW_SCRAPER_VERSION = 4;
 
 const REVIEW_CACHE_DIRECTORY = path.resolve(".cache/amazon/reviews");
 const REVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
-const RECENT_REVIEW_TARGET = 20;
+const RECENT_REVIEW_TARGET = 70;
 const CRITICAL_REVIEW_TARGET = AMAZON_REVIEW_LIMIT - RECENT_REVIEW_TARGET;
-const MAX_RECENT_PAGES = 12;
-const MAX_CRITICAL_PAGES = 5;
 
 type CollectionReason = "recent" | "critical";
 
@@ -24,7 +22,6 @@ type PageCollection = {
     items: Review[];
     pagesVisited: number;
     exhausted: boolean;
-    reachedCutoff: boolean;
     firstPageHtml?: string;
 };
 
@@ -83,19 +80,6 @@ export function parseHelpfulVoteCount(value: string): number {
     ];
 
     return singularMarkers.some(marker => normalized.includes(marker)) ? 1 : 0;
-}
-
-export function createReviewCutoffDate(now: Date | number = new Date()): string {
-    const date = new Date(now);
-    const targetYear = date.getFullYear() - 1;
-    const month = date.getMonth();
-    const lastDayInTargetMonth = new Date(targetYear, month + 1, 0).getDate();
-    const day = Math.min(date.getDate(), lastDayInTargetMonth);
-    return toIsoDate(targetYear, month + 1, day)!;
-}
-
-export function isReviewWithinCutoff(reviewDate: string | null, reviewCutoffDate: string): boolean {
-    return reviewDate !== null && reviewDate >= reviewCutoffDate;
 }
 
 const monthNumbers = new Map<string, number>([
@@ -385,9 +369,7 @@ async function collectPages(
     initialUrl: string,
     reason: CollectionReason,
     maximumItems: number,
-    maximumPages: number,
-    cacheLabel: string,
-    reviewCutoffDate: string
+    cacheLabel: string
 ): Promise<PageCollection> {
     const items: Review[] = [];
     const seenItems = new Set<string>();
@@ -395,10 +377,9 @@ async function collectPages(
     let nextUrl: string | undefined = initialUrl;
     let pagesVisited = 0;
     let exhausted = false;
-    let reachedCutoff = false;
     let firstPageHtml: string | undefined;
 
-    while (nextUrl && pagesVisited < maximumPages && items.length < maximumItems) {
+    while (nextUrl && items.length < maximumItems) {
         if (visitedUrls.has(nextUrl)) {
             exhausted = true;
             break;
@@ -422,11 +403,7 @@ async function collectPages(
         firstPageHtml ??= html;
         await writePageCache(market, asin, cacheLabel, pagesVisited, html);
 
-        const parsedPage = parseAmazonReviewItems(html, market, reason);
-        const parsed = parsedPage.filter(review => isReviewWithinCutoff(review.date, reviewCutoffDate));
-        reachedCutoff ||= parsedPage.some(
-            review => review.date !== null && review.date < reviewCutoffDate
-        );
+        const parsed = parseAmazonReviewItems(html, market, reason);
         let newItems = 0;
         for (const review of parsed) {
             const identity = reviewIdentity(review);
@@ -439,15 +416,15 @@ async function collectPages(
 
         const candidateNextUrl =
             findNextPageUrl(html, page.url()) ??
-            (parsedPage.length >= 8 ? buildNumberedNextPageUrl(page.url(), pagesVisited) : undefined);
-        if (reachedCutoff || !candidateNextUrl || newItems === 0) {
+            (parsed.length >= 8 ? buildNumberedNextPageUrl(page.url(), pagesVisited) : undefined);
+        if (!candidateNextUrl || newItems === 0) {
             exhausted = true;
             break;
         }
         nextUrl = candidateNextUrl;
     }
 
-    return { items, pagesVisited, exhausted, reachedCutoff, firstPageHtml };
+    return { items, pagesVisited, exhausted, firstPageHtml };
 }
 
 export function createAmazonReviewUrl(productHtml: string, market: Market, asin: string): URL {
@@ -496,7 +473,11 @@ function sortNewestFirst(items: Review[]): Review[] {
     });
 }
 
-function selectBalancedReviews(recent: Review[], critical: Review[], embedded: Review[]): Review[] {
+export function selectBalancedReviews(
+    recent: Review[],
+    critical: Review[],
+    embedded: Review[]
+): Review[] {
     const selected: Review[] = [];
     const seen = new Set<string>();
 
@@ -553,8 +534,7 @@ export function isReviewCollectionCurrent(reviews: ProductReviews, now = Date.no
         reviews.collection.limit !== AMAZON_REVIEW_LIMIT ||
         !reviews.collection.complete ||
         reviews.collection.collectedAt === null ||
-        reviews.collection.corpusHash === null ||
-        reviews.collection.reviewCutoffDate !== createReviewCutoffDate(now)
+        reviews.collection.corpusHash === null
     ) {
         return false;
     }
@@ -597,7 +577,6 @@ async function scrapeReviews(
     fallback: ProductReviews
 ): Promise<ProductReviews> {
     const collectedAt = new Date();
-    const reviewCutoffDate = createReviewCutoffDate(collectedAt);
 
     if (fallback.totalCount === 0) {
         const emptyReviews: ProductReviews = {
@@ -611,7 +590,6 @@ async function scrapeReviews(
                 pagesVisited: 0,
                 complete: true,
                 scraperVersion: AMAZON_REVIEW_SCRAPER_VERSION,
-                reviewCutoffDate,
                 corpusHash: null
             }
         };
@@ -623,9 +601,7 @@ async function scrapeReviews(
     const page = await createAmazonPage(market);
 
     try {
-        console.log(
-            `    Collecting up to 30 recent and critical Amazon reviews since ${reviewCutoffDate}...`
-        );
+        console.log(`    Collecting up to ${AMAZON_REVIEW_LIMIT} recent and critical Amazon reviews...`);
         const recent = await collectPages(
             page,
             market,
@@ -633,13 +609,11 @@ async function scrapeReviews(
             baseUrl.href,
             "recent",
             AMAZON_REVIEW_LIMIT,
-            MAX_RECENT_PAGES,
-            "recent",
-            reviewCutoffDate
+            "recent"
         );
 
         if (recent.items.length === 0) {
-            if (explicitlyHasNoWrittenReviews(recent.firstPageHtml ?? "") || recent.reachedCutoff) {
+            if (explicitlyHasNoWrittenReviews(recent.firstPageHtml ?? "")) {
                 const aggregate = parseAggregateReviews(recent.firstPageHtml ?? "", fallback);
                 const noWrittenReviews: ProductReviews = {
                     ...aggregate,
@@ -651,7 +625,6 @@ async function scrapeReviews(
                         pagesVisited: recent.pagesVisited,
                         complete: true,
                         scraperVersion: AMAZON_REVIEW_SCRAPER_VERSION,
-                        reviewCutoffDate,
                         corpusHash: null
                     }
                 };
@@ -671,9 +644,7 @@ async function scrapeReviews(
             withStarFilter(baseUrl, "critical"),
             "critical",
             CRITICAL_REVIEW_TARGET,
-            MAX_CRITICAL_PAGES,
-            "critical",
-            reviewCutoffDate
+            "critical"
         );
 
         if (critical.items.filter(review => review.rating <= 3).length < CRITICAL_REVIEW_TARGET) {
@@ -689,9 +660,7 @@ async function scrapeReviews(
                         withStarFilter(baseUrl, filter),
                         "critical",
                         CRITICAL_REVIEW_TARGET,
-                        1,
-                        filter,
-                        reviewCutoffDate
+                        filter
                     )
                 );
             }
@@ -707,18 +676,12 @@ async function scrapeReviews(
                     critical.pagesVisited +
                     starCollections.reduce((total, collection) => total + collection.pagesVisited, 0),
                 exhausted:
-                    critical.exhausted && starCollections.every(collection => collection.exhausted),
-                reachedCutoff:
-                    critical.reachedCutoff ||
-                    starCollections.some(collection => collection.reachedCutoff)
+                    critical.exhausted && starCollections.every(collection => collection.exhausted)
             };
         }
 
         const aggregate = parseAggregateReviews(recent.firstPageHtml ?? "", fallback);
-        const eligibleFallbackItems = fallback.items.filter(review =>
-            isReviewWithinCutoff(review.date, reviewCutoffDate)
-        );
-        const items = selectBalancedReviews(recent.items, critical.items, eligibleFallbackItems);
+        const items = selectBalancedReviews(recent.items, critical.items, fallback.items);
         const reviews: ProductReviews = {
             ...aggregate,
             items,
@@ -729,7 +692,6 @@ async function scrapeReviews(
                 pagesVisited: recent.pagesVisited + critical.pagesVisited,
                 complete: true,
                 scraperVersion: AMAZON_REVIEW_SCRAPER_VERSION,
-                reviewCutoffDate,
                 corpusHash: null
             }
         };

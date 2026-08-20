@@ -294,7 +294,6 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
             pagesVisited: 0,
             complete: false,
             scraperVersion: 1,
-            reviewCutoffDate: null,
             corpusHash: null
         }
     };

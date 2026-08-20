@@ -79,25 +79,32 @@ export const reviewSchema = z
     })
     .strict();
 
-export const reviewCollectionSchema = z
-    .object({
-        strategy: z.enum(["embedded-top", "recent", "recent-balanced"]),
-        limit: z.number().int().min(1).max(30),
-        collectedAt: z.string().datetime().nullable(),
-        pagesVisited: z.number().int().nonnegative(),
-        complete: z.boolean(),
-        scraperVersion: z.number().int().positive(),
-        reviewCutoffDate: z
-            .string()
-            .regex(/^\d{4}-\d{2}-\d{2}$/)
-            .nullable()
-            .default(null),
-        corpusHash: z
-            .string()
-            .regex(/^[a-f0-9]{64}$/)
-            .nullable()
-    })
-    .strict();
+export const reviewCollectionSchema = z.preprocess(
+    value => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+
+        // Backward compatibility for reports produced while an age cutoff was enforced.
+        const { reviewCutoffDate: _legacyReviewCutoffDate, ...collection } = value as Record<
+            string,
+            unknown
+        >;
+        return collection;
+    },
+    z
+        .object({
+            strategy: z.enum(["embedded-top", "recent", "recent-balanced"]),
+            limit: z.number().int().min(1).max(100),
+            collectedAt: z.string().datetime().nullable(),
+            pagesVisited: z.number().int().nonnegative(),
+            complete: z.boolean(),
+            scraperVersion: z.number().int().positive(),
+            corpusHash: z
+                .string()
+                .regex(/^[a-f0-9]{64}$/)
+                .nullable()
+        })
+        .strict()
+);
 
 const legacyReviewCollection = {
     strategy: "embedded-top" as const,
@@ -106,7 +113,6 @@ const legacyReviewCollection = {
     pagesVisited: 0,
     complete: false,
     scraperVersion: 1,
-    reviewCutoffDate: null,
     corpusHash: null
 };
 
@@ -114,7 +120,7 @@ export const productReviewsSchema = z
     .object({
         overallRating: z.number().min(0).max(5),
         totalCount: z.number().int().nonnegative(),
-        items: z.array(reviewSchema).max(30),
+        items: z.array(reviewSchema).max(100),
         collection: reviewCollectionSchema.default(legacyReviewCollection)
     })
     .strict();

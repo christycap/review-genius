@@ -19,7 +19,7 @@ Review Genius processes a list of Amazon ASINs grouped by market and produces an
 For each product, the tool:
 
 1. Fetches the localized Amazon product page.
-2. Extracts the title, feature bullets, description, product image, overall rating, and total review count. It then builds a corpus of up to 30 reviews no older than one year, deliberately adding recent 1–3-star feedback so customer concerns are represented alongside praise.
+2. Extracts the title, feature bullets, description, product image, overall rating, and total review count. It then builds a recency-sorted corpus of up to 100 reviews, deliberately adding 1–3-star feedback so customer concerns are represented alongside praise.
 3. Captures each review's Amazon helpful-vote count, then asks the configured AI provider—DeepSeek or Gemini—to classify every review as positive or negative and create positive, negative, and overall English sentiment summaries. Helpful votes weight recurring themes, while the full-listing rating and count anchor the overall synthesis.
 4. Sends the original listing and those three summaries—not every review body—to the optimization model, limiting noise while preserving the evidence most useful for copy decisions.
 5. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
@@ -30,7 +30,7 @@ For each product, the tool:
 ```mermaid
 flowchart LR
     A[Market + ASIN input] --> B[Serialized Amazon browser collection]
-    B --> C[Reviews up to one year old + helpful votes]
+    B --> C[Up to 100 reviews + helpful votes]
     C --> D[AI sentiment classification + summaries]
     D --> E[AI listing optimization from summaries]
     E --> F[AI English translation]
@@ -40,7 +40,7 @@ flowchart LR
     I --> H
 ```
 
-All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while review corpora are never reused beyond 24 hours and are refreshed sooner when the calendar-day cutoff advances. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
+All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while review corpora are never reused beyond 24 hours. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
 
 ## Report preview
 
@@ -163,7 +163,7 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website. Reviews without a parsed date and reviews before the build's one-year cutoff are excluded rather than sent to the AI or stored in the new corpus. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website. Review pages are traversed in recency order until Amazon has no next page or the 100-review ceiling is reached; there is no age cutoff. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
 
 The build produces exactly two deliverables:
 
@@ -209,11 +209,11 @@ Review analysis uses its own versioned contract in [`src/prompts/review-sentimen
 
 -   The **positive summary** synthesizes decision-relevant praise.
 -   The **negative summary** synthesizes objections, uncertainty, and friction.
--   The **overall summary** reconciles those recent qualitative themes with Amazon's aggregate rating and total review count.
+-   The **overall summary** reconciles those extracted qualitative themes with Amazon's aggregate rating and total review count.
 
 Helpful votes act as an evidence-weight signal: themes in reviews that customers found useful receive more consideration, but a single highly voted review cannot erase corroborating or conflicting evidence. The prompt also makes clear that the deliberately balanced extracted corpus is not a representative rating sample, so its positive/negative split must not be presented as marketplace prevalence. Review claims remain customer perceptions rather than verified product facts.
 
-The report displays the overall synthesis beside Amazon's aggregate metrics. Positive and negative tabs show their respective summaries first, followed by the classified reviews sorted by helpful-vote count and then recency. Reviews older than the one-year collection cutoff never enter this analysis.
+The report displays the overall synthesis beside Amazon's aggregate metrics. Positive and negative tabs show their respective summaries first, followed by the classified reviews sorted by helpful-vote count and then recency. The collector has no age cutoff and stops only when Amazon has no further review page or the 100-review ceiling is reached.
 
 ## The translation prompt
 

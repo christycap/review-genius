@@ -7,7 +7,6 @@ export function createReviewSentimentSourceHash(reviews: ProductReviews): string
             JSON.stringify({
                 overallRating: reviews.overallRating,
                 totalCount: reviews.totalCount,
-                reviewCutoffDate: reviews.collection.reviewCutoffDate,
                 items: reviews.items.map(review => ({
                     id: review.id,
                     rating: review.rating,

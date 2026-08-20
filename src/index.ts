@@ -125,7 +125,6 @@ async function readOutputFile(filePath: string): Promise<ExistingOutput | undefi
                                     pagesVisited: 0,
                                     complete: false,
                                     scraperVersion: 1,
-                                    reviewCutoffDate: null,
                                     corpusHash: null
                                 }
                             }

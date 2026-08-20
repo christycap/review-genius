@@ -2,7 +2,7 @@
  * Prompt version is persisted with every product so prompt changes invalidate
  * cached suggestions without forcing Amazon product data to be fetched again.
  */
-export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 6 as const;
+export const PRODUCT_OPTIMIZATION_PROMPT_VERSION = 7 as const;
 export const AMAZON_TITLE_CHARACTER_LIMIT = 200;
 
 export const PRODUCT_SUGGESTIONS_JSON_SCHEMA = {
@@ -71,7 +71,6 @@ type ProductOptimizationContext = {
         overallRating: number;
         totalCount: number;
         items: unknown[];
-        collection: { reviewCutoffDate: string | null };
     };
     reviewSentiment: {
         overallSummary: string;
@@ -88,8 +87,7 @@ function createReviewInsights(product: ProductOptimizationContext): unknown {
             totalReviewCount: product.reviews.totalCount
         },
         extractedCorpus: {
-            maximumReviewAge: "one year at collection time",
-            reviewCutoffDate: product.reviews.collection.reviewCutoffDate,
+            maximumReviewCount: 100,
             extractedReviewCount: product.reviews.items.length,
             overallSentimentSummary: product.reviewSentiment.overallSummary,
             positiveReviewSummary: product.reviewSentiment.positiveSummary,
@@ -173,7 +171,7 @@ Return only a JSON object with exactly this shape:
 Rules:
 - Output language is field-specific: write the title, feature bullets, and description in the source listing language; write all three reasoning fields in English.
 - Use only facts present in the title, product features, or description. A benefit is allowed only when it follows directly and conservatively from an explicit product fact. Never invent specifications, quantities, certifications, rankings, guarantees, availability, prices, inclusions, locations, or outcomes.
-- Treat the aggregate rating and total count as population-level context, not proof that the listing copy is effective. The supplied qualitative sentiment summaries were produced from up to 30 reviews no older than one year, with deliberate recent 1–3-star coverage and helpful-vote weighting. The extracted corpus is not a representative rating distribution; never infer prevalence or percentages from its positive and negative themes.
+- Treat the aggregate rating and total count as population-level context, not proof that the listing copy is effective. The supplied qualitative sentiment summaries were produced from up to 100 recency-sorted reviews, with deliberate 1–3-star coverage and helpful-vote weighting. The extracted corpus is not a representative rating distribution; never infer prevalence or percentages from its positive and negative themes.
 - Use the supplied overall, positive, and negative summaries cautiously to prioritize source-supported benefits, customer vocabulary, questions, and objections. Positive themes can reveal facts that deserve prominence; negative themes can reveal uncertainty that the listing should clarify. Never turn a summarized customer perception or unverified review detail into a product fact.
 
 Conversion framework distilled from current Amazon guidance and ecommerce usability research:

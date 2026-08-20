@@ -945,7 +945,8 @@ function ReviewsView({
                     <CardTitle>Review overview</CardTitle>
                     <CardDescription>
                         Aggregate data shown by Amazon. The qualitative AI corpus contains{" "}
-                        {reviews.items.length} reviews no older than one year
+                        {reviews.items.length} reviews, with a collection ceiling of{" "}
+                        {reviews.collection.limit}
                         {criticalCoverage > 0
                             ? `, including ${criticalCoverage} added for 1–3-star concern coverage`
                             : ""}
@@ -1027,12 +1028,9 @@ function ReviewsView({
             )}
 
             <p className="text-center text-xs text-muted-foreground">
-                Review corpus collected with the recent-balanced strategy
-                {collectedAt ? ` on ${collectedAt}` : ""}
-                {reviews.collection.reviewCutoffDate
-                    ? `; reviews before ${reviews.collection.reviewCutoffDate} were excluded`
-                    : ""}
-                . Aggregate totals remain Amazon's full-listing figures.
+                Review corpus collected with a recency-sorted balanced strategy
+                {collectedAt ? ` on ${collectedAt}` : ""}. Aggregate totals remain Amazon's full-listing
+                figures.
             </p>
         </div>
     );

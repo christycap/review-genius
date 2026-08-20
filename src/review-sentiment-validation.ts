@@ -21,13 +21,7 @@ function removeEchoedInputMetadata(value: unknown): unknown {
     if (!isRecord(value)) return value;
 
     const normalized = { ...value };
-    for (const key of [
-        "market",
-        "overallRating",
-        "totalReviewCount",
-        "extractedReviewCount",
-        "reviewCutoffDate"
-    ]) {
+    for (const key of ["market", "overallRating", "totalReviewCount", "extractedReviewCount"]) {
         delete normalized[key];
     }
 
