@@ -23,7 +23,7 @@ import {
     ThumbsUp,
     UsersRound
 } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReportAiConfig } from "../ai.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "../prompts/product-optimization.js";
@@ -52,7 +52,7 @@ import { Separator } from "./components/ui/separator.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs.js";
 import { Textarea } from "./components/ui/textarea.js";
 import { cn } from "./lib/utils.js";
-import { regenerateSuggestions } from "./regenerate-suggestions.js";
+import { regenerateSuggestions, type RegenerationProgress } from "./regenerate-suggestions.js";
 
 type Product = ScrapedProduct & {
     suggestionPromptVersion?: number;
@@ -258,6 +258,17 @@ function EnglishTranslationReveal({
 
 function countCharacters(value: string): number {
     return Array.from(value).length;
+}
+
+function formatElapsedTime(milliseconds: number): string {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes === 0) return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}${
+        seconds > 0 ? ` ${seconds} ${seconds === 1 ? "second" : "seconds"}` : ""
+    }`;
 }
 
 function CharacterMetrics({ count, originalCount }: { count: number; originalCount?: number }) {
@@ -533,6 +544,28 @@ function ListPanel({
     );
 }
 
+function ModelReasoning({ reasoning, open = false }: { reasoning: string; open?: boolean }) {
+    return (
+        <details className="group rounded-lg border border-primary/20 bg-background/60" open={open}>
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold marker:hidden select-none [&::-webkit-details-marker]:hidden">
+                <span className="inline-flex items-center gap-2">
+                    <Lightbulb className="size-3.5 text-primary" /> Model reasoning output
+                </span>
+                <ChevronRight className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="border-t border-primary/15 p-3">
+                <p className="mb-2 text-xs leading-5 text-muted-foreground">
+                    Working notes may be incomplete. The validated suggestions and their editorial
+                    rationales remain the authoritative output.
+                </p>
+                <pre className="max-h-64 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+                    {reasoning}
+                </pre>
+            </div>
+        </details>
+    );
+}
+
 function SuggestionRegenerator({
     market,
     product,
@@ -550,7 +583,24 @@ function SuggestionRegenerator({
     const [feedback, setFeedback] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string>();
+    const [progress, setProgress] = useState<RegenerationProgress>();
+    const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
+    const [lastRun, setLastRun] = useState<{ duration: number; reasoning?: string }>();
+    const startedAt = useRef<number | undefined>(undefined);
     const formId = `suggestion-feedback-${market}-${product.asin}`;
+
+    useEffect(() => {
+        if (!loading || startedAt.current === undefined) return;
+
+        const updateElapsed = () => {
+            if (startedAt.current !== undefined) {
+                setElapsedMilliseconds(Date.now() - startedAt.current);
+            }
+        };
+        updateElapsed();
+        const interval = window.setInterval(updateElapsed, 1_000);
+        return () => window.clearInterval(interval);
+    }, [loading]);
 
     async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
@@ -559,6 +609,11 @@ function SuggestionRegenerator({
 
         setLoading(true);
         setError(undefined);
+        setProgress({ stage: "generating", attempt: 1 });
+        setElapsedMilliseconds(0);
+        setLastRun(undefined);
+        startedAt.current = Date.now();
+        let returnedReasoning: string | undefined;
 
         try {
             if (!product.reviewSentiment) {
@@ -571,15 +626,30 @@ function SuggestionRegenerator({
                 market,
                 { ...product, reviewSentiment: product.reviewSentiment },
                 product.suggestions,
-                additionalFeedback
+                additionalFeedback,
+                nextProgress => {
+                    if (nextProgress.reasoning) returnedReasoning = nextProgress.reasoning;
+                    setProgress(nextProgress);
+                }
             );
+            const duration = Date.now() - startedAt.current;
             onRegenerated(refinement);
+            setElapsedMilliseconds(duration);
+            setLastRun({ duration, reasoning: returnedReasoning });
             setFeedback("");
             setOpen(false);
         } catch (requestError) {
-            setError(requestError instanceof Error ? requestError.message : String(requestError));
+            const duration = Date.now() - startedAt.current;
+            setElapsedMilliseconds(duration);
+            setError(
+                `${
+                    requestError instanceof Error ? requestError.message : String(requestError)
+                } Failed after ${formatElapsedTime(duration)}.`
+            );
         } finally {
             setLoading(false);
+            setProgress(undefined);
+            startedAt.current = undefined;
         }
     }
 
@@ -617,16 +687,17 @@ function SuggestionRegenerator({
                 </div>
 
                 {refined && !open && (
-                    <div
-                        className="flex flex-col gap-3 border-t border-primary/15 px-5 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                        role="status"
-                    >
-                        <span className="text-muted-foreground">
-                            Browser-refined suggestions are displayed and saved on this device.
-                        </span>
-                        <Button type="button" variant="ghost" size="sm" onClick={onRestore}>
-                            <RotateCcw /> Restore report suggestions
-                        </Button>
+                    <div className="space-y-3 border-t border-primary/15 px-5 py-3 text-sm">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-muted-foreground" role="status">
+                                Browser-refined suggestions are displayed and saved on this device.
+                                {lastRun && ` Completed in ${formatElapsedTime(lastRun.duration)}.`}
+                            </span>
+                            <Button type="button" variant="ghost" size="sm" onClick={onRestore}>
+                                <RotateCcw /> Restore report suggestions
+                            </Button>
+                        </div>
+                        {lastRun?.reasoning && <ModelReasoning reasoning={lastRun.reasoning} />}
                     </div>
                 )}
 
@@ -666,6 +737,55 @@ function SuggestionRegenerator({
                             </div>
                         </div>
 
+                        {loading && progress && (
+                            <div className="space-y-4 rounded-xl border border-primary/25 bg-primary/[0.045] p-4">
+                                <div className="flex items-start gap-3">
+                                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                        <LoaderCircle className="size-5 animate-spin" />
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="font-semibold" aria-live="polite">
+                                            {progress.stage === "generating"
+                                                ? `${reportAiConfig.providerName} is analyzing the feedback and rewriting the listing…`
+                                                : `Suggestions are ready. ${reportAiConfig.providerName} is generating English translations…`}
+                                        </p>
+                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <span className="font-mono tabular-nums">
+                                                {formatElapsedTime(elapsedMilliseconds)} elapsed
+                                            </span>
+                                            {progress.attempt > 1 && (
+                                                <Badge variant="outline">
+                                                    Attempt {progress.attempt} of 3
+                                                </Badge>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-xs font-medium">
+                                    <div className="rounded-md bg-primary px-3 py-2 text-center text-primary-foreground">
+                                        {progress.stage === "generating"
+                                            ? "Generating suggestions"
+                                            : "Suggestions ready"}
+                                    </div>
+                                    <div
+                                        className={cn(
+                                            "rounded-md px-3 py-2 text-center",
+                                            progress.stage === "translating"
+                                                ? "bg-primary text-primary-foreground"
+                                                : "bg-muted text-muted-foreground"
+                                        )}
+                                    >
+                                        English translation
+                                    </div>
+                                </div>
+
+                                {progress.reasoning && (
+                                    <ModelReasoning reasoning={progress.reasoning} open />
+                                )}
+                            </div>
+                        )}
+
                         {error && (
                             <div
                                 className="flex gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
@@ -692,7 +812,7 @@ function SuggestionRegenerator({
                                 {loading ? (
                                     <>
                                         <LoaderCircle className="animate-spin" />
-                                        Regenerating and translating with {reportAiConfig.providerName}…
+                                        Working with {reportAiConfig.providerName}…
                                     </>
                                 ) : (
                                     <>

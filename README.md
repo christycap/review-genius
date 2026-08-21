@@ -182,6 +182,8 @@ open output/Smartbox_2026.html
 
 For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, persisted sentiment summaries, current suggestions, and additional feedback to the provider and model selected during the build. Individual review bodies are not included in this optimization request. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
 
+While the request runs, the report shows the active generation or translation stage, elapsed time, and retry attempt. If the provider returns DeepSeek reasoning content or a Gemini thought summary, it is exposed as expandable working notes; the validated field-level rationales remain the authoritative explanation of the final proposal.
+
 The refined title, features, description, English rationales, and English translations replace the displayed proposal as one unit. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `output/Smartbox_2026.json`.
 
 ## The optimization prompt

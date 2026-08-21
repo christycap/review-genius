@@ -33,7 +33,10 @@ const deepSeekResponseSchema = z.object({
         .array(
             z.object({
                 finish_reason: z.string().nullable(),
-                message: z.object({ content: z.string().nullable() })
+                message: z.object({
+                    content: z.string().nullable(),
+                    reasoning_content: z.string().nullable().optional()
+                })
             })
         )
         .min(1)
@@ -71,6 +74,17 @@ class BrowserAiError extends Error {
         super(message);
     }
 }
+
+export type RegenerationProgress = {
+    stage: "generating" | "translating";
+    attempt: number;
+    reasoning?: string;
+};
+
+type GeneratedSuggestions = {
+    suggestions: ProductSuggestions;
+    reasoning?: string;
+};
 
 function isRetryableStatus(status: number): boolean {
     return status === 408 || status === 429 || status >= 500;
@@ -179,7 +193,7 @@ async function requestDeepSeekSuggestions(
     product: ProductOptimizationProduct,
     currentSuggestions: ProductSuggestions | undefined,
     feedback: string
-): Promise<ProductSuggestions> {
+): Promise<GeneratedSuggestions> {
     const responseValue = await fetchFromBrowser(config.providerName, DEEPSEEK_URL, {
         method: "POST",
         headers: {
@@ -223,12 +237,15 @@ async function requestDeepSeekSuggestions(
         );
     }
 
-    return validateResponse(
-        config.providerName,
-        choice.message.content ?? "",
-        product,
-        currentSuggestions
-    );
+    return {
+        suggestions: validateResponse(
+            config.providerName,
+            choice.message.content ?? "",
+            product,
+            currentSuggestions
+        ),
+        reasoning: choice.message.reasoning_content?.trim() || undefined
+    };
 }
 
 async function requestGeminiSuggestions(
@@ -237,7 +254,7 @@ async function requestGeminiSuggestions(
     product: ProductOptimizationProduct,
     currentSuggestions: ProductSuggestions | undefined,
     feedback: string
-): Promise<ProductSuggestions> {
+): Promise<GeneratedSuggestions> {
     const responseValue = await fetchFromBrowser(
         config.providerName,
         `${GEMINI_API_BASE_URL}/${encodeURIComponent(config.model)}:generateContent`,
@@ -268,6 +285,7 @@ async function requestGeminiSuggestions(
                 ],
                 generationConfig: {
                     maxOutputTokens: 32_768,
+                    thinkingConfig: { includeThoughts: true },
                     responseFormat: {
                         text: {
                             mimeType: "APPLICATION_JSON",
@@ -300,8 +318,17 @@ async function requestGeminiSuggestions(
             .filter(part => part.thought !== true)
             .map(part => part.text ?? "")
             .join("") ?? "";
+    const reasoning =
+        candidate.content?.parts
+            .filter(part => part.thought === true)
+            .map(part => part.text ?? "")
+            .join("")
+            .trim() || undefined;
 
-    return validateResponse(config.providerName, content, product, currentSuggestions);
+    return {
+        suggestions: validateResponse(config.providerName, content, product, currentSuggestions),
+        reasoning
+    };
 }
 
 function validateTranslationResponse(
@@ -432,10 +459,10 @@ async function requestGeminiTranslations(
     return validateTranslationResponse(config.providerName, content, suggestions);
 }
 
-async function retryBrowserRequest<T>(request: () => Promise<T>): Promise<T> {
+async function retryBrowserRequest<T>(request: (attempt: number) => Promise<T>): Promise<T> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
-            return await request();
+            return await request(attempt);
         } catch (error) {
             if (!(error instanceof BrowserAiError) || !error.retryable || attempt === MAX_ATTEMPTS) {
                 throw error;
@@ -453,18 +480,24 @@ export async function regenerateSuggestions(
     market: Market,
     product: ProductOptimizationProduct,
     currentSuggestions: ProductSuggestions | undefined,
-    feedback: string
+    feedback: string,
+    onProgress?: (progress: RegenerationProgress) => void
 ): Promise<RefinedSuggestions> {
-    const suggestions = await retryBrowserRequest(() =>
-        config.provider === "deepseek"
+    const generated = await retryBrowserRequest(attempt => {
+        onProgress?.({ stage: "generating", attempt });
+        return config.provider === "deepseek"
             ? requestDeepSeekSuggestions(config, market, product, currentSuggestions, feedback)
-            : requestGeminiSuggestions(config, market, product, currentSuggestions, feedback)
-    );
-    const englishTranslations = await retryBrowserRequest(() =>
-        config.provider === "deepseek"
-            ? requestDeepSeekTranslations(config, market, suggestions)
-            : requestGeminiTranslations(config, market, suggestions)
-    );
+            : requestGeminiSuggestions(config, market, product, currentSuggestions, feedback);
+    });
+    const englishTranslations = await retryBrowserRequest(attempt => {
+        onProgress?.({ stage: "translating", attempt, reasoning: generated.reasoning });
+        return config.provider === "deepseek"
+            ? requestDeepSeekTranslations(config, market, generated.suggestions)
+            : requestGeminiTranslations(config, market, generated.suggestions);
+    });
 
-    return { suggestions, englishTranslations };
+    return {
+        suggestions: generated.suggestions,
+        englishTranslations
+    };
 }
