@@ -642,6 +642,28 @@ async function writeReviewCache(market: Market, asin: string, reviews: ProductRe
     await rename(temporaryPath, cachePath);
 }
 
+function createEmptyReviewCorpus(
+    aggregate: Pick<ProductReviews, "overallRating" | "totalCount">,
+    collectedAt: Date,
+    pagesVisited: number
+): ProductReviews {
+    const reviews: ProductReviews = {
+        ...aggregate,
+        items: [],
+        collection: {
+            strategy: "recent-balanced",
+            limit: AMAZON_REVIEW_LIMIT,
+            collectedAt: collectedAt.toISOString(),
+            pagesVisited,
+            complete: true,
+            scraperVersion: AMAZON_REVIEW_SCRAPER_VERSION,
+            corpusHash: null
+        }
+    };
+    reviews.collection.corpusHash = createReviewCorpusHash(reviews);
+    return reviews;
+}
+
 async function scrapeReviews(
     market: Market,
     asin: string,
@@ -651,22 +673,7 @@ async function scrapeReviews(
     const collectedAt = new Date();
 
     if (fallback.totalCount === 0) {
-        const emptyReviews: ProductReviews = {
-            overallRating: fallback.overallRating,
-            totalCount: 0,
-            items: [],
-            collection: {
-                strategy: "recent-balanced",
-                limit: AMAZON_REVIEW_LIMIT,
-                collectedAt: collectedAt.toISOString(),
-                pagesVisited: 0,
-                complete: true,
-                scraperVersion: AMAZON_REVIEW_SCRAPER_VERSION,
-                corpusHash: null
-            }
-        };
-        emptyReviews.collection.corpusHash = createReviewCorpusHash(emptyReviews);
-        return emptyReviews;
+        return createEmptyReviewCorpus(fallback, collectedAt, 0);
     }
 
     const baseUrl = createAmazonReviewUrl(productHtml, market, asin);
@@ -685,28 +692,16 @@ async function scrapeReviews(
         );
 
         if (recent.items.length === 0) {
-            if (explicitlyHasNoWrittenReviews(recent.firstPageHtml ?? "")) {
-                const aggregate = parseAggregateReviews(recent.firstPageHtml ?? "", fallback);
-                const noWrittenReviews: ProductReviews = {
-                    ...aggregate,
-                    items: [],
-                    collection: {
-                        strategy: "recent-balanced",
-                        limit: AMAZON_REVIEW_LIMIT,
-                        collectedAt: collectedAt.toISOString(),
-                        pagesVisited: recent.pagesVisited,
-                        complete: true,
-                        scraperVersion: AMAZON_REVIEW_SCRAPER_VERSION,
-                        corpusHash: null
-                    }
-                };
-                noWrittenReviews.collection.corpusHash = createReviewCorpusHash(noWrittenReviews);
-                return noWrittenReviews;
-            }
-
-            throw new Error(
-                "Amazon returned no readable recent reviews even though the listing reports reviews"
+            const firstPageHtml = recent.firstPageHtml ?? "";
+            const aggregate = parseAggregateReviews(firstPageHtml, fallback);
+            console.warn(
+                explicitlyHasNoWrittenReviews(firstPageHtml)
+                    ? "    Amazon reports no written customer reviews; continuing with aggregate ratings"
+                    : `    Amazon reports ${aggregate.totalCount} aggregate rating${
+                          aggregate.totalCount === 1 ? "" : "s"
+                      } but exposed no readable written reviews; continuing without a qualitative corpus`
             );
+            return createEmptyReviewCorpus(aggregate, collectedAt, recent.pagesVisited);
         }
 
         let critical = await collectPages(

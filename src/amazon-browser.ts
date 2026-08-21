@@ -6,6 +6,7 @@ import { amazonMarketplaces } from "./amazon-marketplaces.js";
 import type { Market } from "./schemas.js";
 
 const AMAZON_BROWSER_PROFILE = path.resolve(".cache/amazon-browser-profile");
+const AMAZON_PROTOCOL_TIMEOUT_MS = 300_000;
 
 let browserPromise: Promise<Browser> | undefined;
 
@@ -15,6 +16,7 @@ async function launchAmazonBrowser(): Promise<Browser> {
     console.log("    Opening the dedicated Amazon browser session...");
     const browser = await puppeteer.launch({
         headless: false,
+        protocolTimeout: AMAZON_PROTOCOL_TIMEOUT_MS,
         userDataDir: AMAZON_BROWSER_PROFILE,
         defaultViewport: { width: 1440, height: 1_000 },
         args: ["--no-first-run", "--no-default-browser-check"]

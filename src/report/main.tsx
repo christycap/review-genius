@@ -1031,13 +1031,25 @@ function ReviewsView({
                 <CardHeader>
                     <CardTitle>Review overview</CardTitle>
                     <CardDescription>
-                        Aggregate data shown by Amazon. The qualitative review corpus contains{" "}
-                        {reviews.items.length} reviews, with a collection ceiling of{" "}
-                        {reviews.collection.limit}
-                        {criticalCoverage > 0
-                            ? `, including ${criticalCoverage} added for 1–3-star concern coverage`
-                            : ""}
-                        .
+                        {reviews.items.length === 0 ? (
+                            <>
+                                Amazon’s aggregate count can include ratings without written comments. No
+                                eligible written reviews were publicly available for qualitative
+                                analysis.
+                            </>
+                        ) : (
+                            <>
+                                Amazon’s aggregate count can include ratings without written comments.
+                                The report extracted {reviews.items.length} eligible written reviews
+                                (maximum {reviews.collection.limit}). Amazon may expose only a subset of
+                                written reviews on its public review pages; marketplace filtering and
+                                deduplication can further reduce the corpus
+                                {criticalCoverage > 0
+                                    ? `, including ${criticalCoverage} added for 1–3-star concern coverage`
+                                    : ""}
+                                .
+                            </>
+                        )}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -1054,30 +1066,40 @@ function ReviewsView({
                         </div>
                         <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
                             <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                                Total review count
+                                Total rating count
                             </span>
                             <span className="mt-3 text-5xl font-bold tracking-tight">
                                 {reviews.totalCount.toLocaleString("en")}
                             </span>
                             <span className="mt-1 inline-flex items-center gap-2 text-sm text-muted-foreground">
-                                <UsersRound className="size-4" /> Amazon customer reviews
+                                <UsersRound className="size-4" /> Amazon customer ratings
                             </span>
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
-                        <p className="mb-2 text-xs font-semibold tracking-widest text-primary uppercase">
-                            Overall sentiment
-                        </p>
-                        <p lang="en" className="text-sm leading-7 text-muted-foreground">
-                            {sentimentAnalysis?.overallSummary ??
-                                "Sentiment analysis is not available for this product yet."}
-                        </p>
-                    </div>
+                    {reviews.items.length === 0 ? (
+                        <div className="rounded-xl border border-dashed p-6 text-center">
+                            <p className="font-semibold">No written customer reviews available</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                                Copy recommendations are based on the product listing and Amazon’s
+                                aggregate rating data.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+                            <p className="mb-2 text-xs font-semibold tracking-widest text-primary uppercase">
+                                Overall sentiment
+                            </p>
+                            <p lang="en" className="text-sm leading-7 text-muted-foreground">
+                                {sentimentAnalysis?.overallSummary ??
+                                    "Sentiment analysis is not available for this product yet."}
+                            </p>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
 
-            {sentimentAnalysis && (
+            {reviews.items.length > 0 && sentimentAnalysis && (
                 <Tabs defaultValue={defaultSentiment}>
                     <TabsList className="grid w-full grid-cols-2 sm:w-[470px]">
                         <TabsTrigger value="positive" aria-label="Positive sentiment reviews">
@@ -1114,11 +1136,13 @@ function ReviewsView({
                 </Tabs>
             )}
 
-            <p className="text-center text-xs text-muted-foreground">
-                Review corpus collected with a recency-sorted balanced strategy
-                {collectedAt ? ` on ${collectedAt}` : ""}. Aggregate totals remain Amazon's full-listing
-                figures.
-            </p>
+            {reviews.items.length > 0 && (
+                <p className="text-center text-xs text-muted-foreground">
+                    Review corpus collected with a recency-sorted balanced strategy
+                    {collectedAt ? ` on ${collectedAt}` : ""}. Aggregate totals remain Amazon's
+                    full-listing figures.
+                </p>
+            )}
         </div>
     );
 }
@@ -1146,7 +1170,7 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                         <span className="inline-flex items-center gap-2 text-sm text-white/75">
                             <RatingStars rating={product.reviews.overallRating} size="small" />
                             {product.reviews.overallRating.toFixed(1)} ·{" "}
-                            {product.reviews.totalCount.toLocaleString("en")} reviews
+                            {product.reviews.totalCount.toLocaleString("en")} ratings
                         </span>
                     </div>
                     <h1

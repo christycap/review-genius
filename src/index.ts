@@ -412,7 +412,7 @@ async function processDataset(
                 console.log(
                     `  [${index + 1}/${asins.length}] ${asin}: saved (${
                         scrapedProduct.reviews.items.length
-                    } extracted reviews, ${scrapedProduct.reviews.totalCount} total)`
+                    } extracted reviews, ${scrapedProduct.reviews.totalCount} total ratings)`
                 );
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);

@@ -35,6 +35,8 @@ import {
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 export const DEEPSEEK_MODEL = "deepseek-v4-flash";
 const MAX_ATTEMPTS = 3;
+const SUGGESTION_TOKEN_LIMITS = [65_536, 131_072, 262_144] as const;
+const SUGGESTION_REQUEST_TIMEOUT_MS = 600_000;
 
 const completionSchema = z.object({
     choices: z
@@ -50,7 +52,7 @@ const completionSchema = z.object({
 });
 
 class DeepSeekError extends Error {
-    constructor(message: string, readonly retryable = false) {
+    constructor(message: string, readonly retryable = false, readonly finishReason?: string) {
         super(message);
     }
 }
@@ -68,7 +70,8 @@ function getApiErrorMessage(value: unknown, status: number): string {
 async function requestSuggestions(
     apiKey: string,
     market: Market,
-    product: ProductOptimizationProduct
+    product: ProductOptimizationProduct,
+    maxTokens: number
 ): Promise<ProductSuggestions> {
     let response: Response;
     let responseText: string;
@@ -93,9 +96,9 @@ async function requestSuggestions(
                         }
                     ],
                     response_format: { type: "json_object" },
-                    max_tokens: 32_768
+                    max_tokens: maxTokens
                 }),
-                signal: AbortSignal.timeout(240_000)
+                signal: AbortSignal.timeout(SUGGESTION_REQUEST_TIMEOUT_MS)
             });
 
             return { response, responseText: await response.text() };
@@ -134,10 +137,23 @@ async function requestSuggestions(
     }
 
     const choice = completionResult.data.choices[0];
+
+    // A JSON-mode response can occasionally reach the token ceiling after it has already
+    // produced a complete object. Accept it only when the normal shape and content validation
+    // succeeds; otherwise retry with a larger reasoning/output budget below.
+    if (choice.finish_reason === "length") {
+        try {
+            return parseAndValidateSuggestions(choice.message.content ?? "", product);
+        } catch (error) {
+            if (!(error instanceof SuggestionValidationError)) throw error;
+        }
+    }
+
     if (choice.finish_reason !== "stop") {
         throw new DeepSeekError(
             `DeepSeek stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
-            choice.finish_reason === "insufficient_system_resource"
+            choice.finish_reason === "length" || choice.finish_reason === "insufficient_system_resource",
+            choice.finish_reason ?? undefined
         );
     }
 
@@ -334,14 +350,22 @@ export async function suggestProductImprovementsWithDeepSeek(
     product: ProductOptimizationProduct
 ): Promise<ProductSuggestions> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+        const maxTokens = SUGGESTION_TOKEN_LIMITS[attempt - 1];
         try {
-            return await requestSuggestions(apiKey, market, product);
+            return await requestSuggestions(apiKey, market, product, maxTokens);
         } catch (error) {
             if (!(error instanceof DeepSeekError) || !error.retryable || attempt === MAX_ATTEMPTS) {
                 throw error;
             }
 
-            writeProgressWarning(`    ${error.message}. Retrying immediately...`);
+            const nextTokenLimit = SUGGESTION_TOKEN_LIMITS[attempt];
+            writeProgressWarning(
+                error.finishReason === "length"
+                    ? `    ${error.message}. Retrying immediately with a ${nextTokenLimit.toLocaleString(
+                          "en"
+                      )} token ceiling...`
+                    : `    ${error.message}. Retrying immediately...`
+            );
         }
     }
 
