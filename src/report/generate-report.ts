@@ -18,6 +18,7 @@ const CACHED_PRODUCT_IMAGES_DIRECTORY = path.join(REPORT_CACHE_DIRECTORY, "produ
 const OPTIMIZED_PRODUCT_IMAGES_DIRECTORY = path.join(REPORT_CACHE_DIRECTORY, "optimized-product-images");
 const CACHED_STYLES_PATH = path.join(REPORT_CACHE_DIRECTORY, "app.css");
 const PRODUCT_IMAGE_MAXIMUM_SIZE = 640;
+const REPORT_NAME = "Review Genius";
 
 function escapeHtmlText(value: string): string {
     return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -57,7 +58,7 @@ function createSingleFileHtml(
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="color-scheme" content="light dark" />
         <meta name="theme-color" content="#008099" />
-        <title>Review Genius 2.0 · ${escapeHtmlText(reportTitle)}</title>
+        <title>${REPORT_NAME} · ${escapeHtmlText(reportTitle)}</title>
         <link rel="icon" type="image/x-icon" href="${faviconUrl}" />
         <script>
             try {
@@ -70,7 +71,7 @@ function createSingleFileHtml(
     </head>
     <body>
         <div id="root"></div>
-        <noscript>Review Genius 2.0 requires JavaScript to navigate the report.</noscript>
+        <noscript>${REPORT_NAME} requires JavaScript to navigate the report.</noscript>
         <script>${escapeInlineScript(applicationJavaScript)}</script>
     </body>
 </html>

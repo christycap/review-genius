@@ -71,6 +71,7 @@ declare const __REPORT_LOGO_URL__: string;
 
 const { title: reportTitle, markets: reportData } = __REPORT_DATA__;
 const reportAiConfig = __REPORT_AI_CONFIG__;
+const REPORT_NAME = "Review Genius";
 const REFINEMENT_STORAGE_KEY = [
     "review-genius-refinements",
     reportTitle,
@@ -1331,7 +1332,7 @@ function Header({
                     <img src={__REPORT_LOGO_URL__} alt="Numberly" className="h-7 w-auto sm:h-9" />
                     <Separator orientation="vertical" className="hidden h-8 sm:block" />
                     <div>
-                        <p className="text-sm font-bold tracking-tight sm:text-lg">Review Genius 2.0</p>
+                        <p className="text-sm font-bold tracking-tight sm:text-lg">{REPORT_NAME}</p>
                         <p className="text-xs text-muted-foreground">
                             <span className="font-medium text-foreground/80">{reportTitle}</span>
                             <span className="hidden sm:inline">
@@ -1521,7 +1522,9 @@ function App() {
                         </Tabs>
 
                         <footer className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t py-6 text-xs text-muted-foreground">
-                            <span>Review Genius 2.0 · {reportTitle} report</span>
+                            <span>
+                                {REPORT_NAME} · {reportTitle} report
+                            </span>
                             <span className="inline-flex items-center gap-1">
                                 Self-contained local report <ArrowRight className="size-3" />{" "}
                                 {marketMetadata[group.market].label}

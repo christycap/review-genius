@@ -2,7 +2,7 @@
   <img src="assets/numberly-logo.svg" alt="Numberly" width="220" />
 </p>
 
-<h1 align="center">Review Genius 2.0</h1>
+<h1 align="center">Review Genius</h1>
 
 <p align="center">
   Turn Amazon listings and customer reviews into copy recommendations designed around official Amazon guidance and conversion best practices, delivered in a self-contained, navigable report.

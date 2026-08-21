@@ -9,6 +9,7 @@ import type { Market, StoredOutput, StoredProduct } from "../schemas.js";
 const EXCEL_CACHE_DIRECTORY = path.resolve(".cache/excel");
 const EXCEL_CELL_CHARACTER_LIMIT = 32_767;
 const WORKBOOK_FONT = "Arial";
+const REPORT_NAME = "Review Genius";
 const MARKET_NAMES: Record<Market, string> = {
     fr: "France",
     it: "Italy",
@@ -178,7 +179,7 @@ function addOverviewSheet(
     ];
     styleBanner(
         worksheet,
-        "Review Genius 2.0",
+        REPORT_NAME,
         `${output.title} · ${MARKET_NAMES[market]} (${market}) · ${products.length} product${
             products.length === 1 ? "" : "s"
         }`,
@@ -263,7 +264,7 @@ function addOverviewSheet(
         paperSize: 9,
         margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
     };
-    worksheet.headerFooter.oddFooter = "&LReview Genius 2.0&C&A&RPage &P of &N";
+    worksheet.headerFooter.oddFooter = `&L${REPORT_NAME}&C&A&RPage &P of &N`;
 }
 
 type CopyComparison = {
@@ -344,7 +345,7 @@ function addProductSheet(
     ];
     styleBanner(
         worksheet,
-        `Review Genius 2.0 · ${product.asin}`,
+        `${REPORT_NAME} · ${product.asin}`,
         `${output.title} · ${MARKET_NAMES[market]} (${market})`,
         9
     );
@@ -536,7 +537,7 @@ function addProductSheet(
         printArea: "A1:I13",
         margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
     };
-    worksheet.headerFooter.oddFooter = `&LReview Genius 2.0&C${product.asin}&RPage &P of &N`;
+    worksheet.headerFooter.oddFooter = `&L${REPORT_NAME}&C${product.asin}&RPage &P of &N`;
 }
 
 type ReviewExportEntry = {
@@ -603,7 +604,7 @@ function addReviewsSheet(
     const reviewCount = products.reduce((total, product) => total + product.reviews.items.length, 0);
     styleBanner(
         worksheet,
-        "Review Genius 2.0 · Extracted reviews",
+        `${REPORT_NAME} · Extracted reviews`,
         `${output.title} · ${MARKET_NAMES[market]} (${market}) · ${reviewCount} review${
             reviewCount === 1 ? "" : "s"
         }`,
@@ -714,7 +715,7 @@ function addReviewsSheet(
         paperSize: 9,
         margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
     };
-    worksheet.headerFooter.oddFooter = "&LReview Genius 2.0&CExtracted reviews&RPage &P of &N";
+    worksheet.headerFooter.oddFooter = `&L${REPORT_NAME}&CExtracted reviews&RPage &P of &N`;
 }
 
 function createProductSheetNames(products: StoredProduct[]): Map<string, string> {
@@ -743,8 +744,8 @@ function createMarketWorkbook(
     products: StoredProduct[]
 ): ExcelJS.Workbook {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Numberly · Review Genius 2.0";
-    workbook.lastModifiedBy = "Review Genius 2.0";
+    workbook.creator = `Numberly · ${REPORT_NAME}`;
+    workbook.lastModifiedBy = REPORT_NAME;
     workbook.created = new Date();
     workbook.modified = new Date();
     workbook.company = "Numberly";
