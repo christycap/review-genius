@@ -36,7 +36,6 @@ export type SuggestionService = {
 
 export type ReportAiConfig = {
     provider: SuggestionProvider;
-    providerName: "DeepSeek" | "Gemini";
     model: string;
     apiKey: string;
 };
@@ -61,14 +60,13 @@ export function createSuggestionService(
     if (deepSeekApiKey) {
         const reportConfig: ReportAiConfig = {
             provider: "deepseek",
-            providerName: "DeepSeek",
             model: DEEPSEEK_MODEL,
             apiKey: deepSeekApiKey
         };
 
         return {
             provider: reportConfig.provider,
-            providerName: reportConfig.providerName,
+            providerName: "DeepSeek",
             model: reportConfig.model,
             reportConfig,
             analyzeReviews: (market, reviews) =>
@@ -95,14 +93,13 @@ export function createSuggestionService(
 
         const reportConfig: ReportAiConfig = {
             provider: "gemini",
-            providerName: "Gemini",
             model,
             apiKey: geminiApiKey
         };
 
         return {
             provider: reportConfig.provider,
-            providerName: reportConfig.providerName,
+            providerName: "Gemini",
             model: reportConfig.model,
             reportConfig,
             analyzeReviews: (market, reviews) =>

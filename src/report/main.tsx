@@ -55,7 +55,6 @@ import { cn } from "./lib/utils.js";
 import { regenerateSuggestions, type RegenerationProgress } from "./regenerate-suggestions.js";
 
 type Product = ScrapedProduct & {
-    suggestionPromptVersion?: number;
     suggestions?: ProductSuggestions;
     reviewSentiment?: ReviewSentimentAnalysis;
     englishTranslations?: ProductEnglishTranslations;
@@ -299,12 +298,12 @@ function CharacterMetrics({ count, originalCount }: { count: number; originalCou
     );
 }
 
-function Reasoning({ children }: { children: string }) {
+function RecommendationRationale({ children }: { children: string }) {
     return (
         <div className="mt-5 flex gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm leading-6">
             <Lightbulb className="mt-0.5 size-4 shrink-0 text-primary" />
             <div>
-                <p className="mb-1 font-semibold text-primary">Reasoning</p>
+                <p className="mb-1 font-semibold text-primary">Recommendation rationale</p>
                 <p lang="en" className="text-muted-foreground">
                     {children}
                 </p>
@@ -353,7 +352,7 @@ function TitleComparison({ product, languageTag }: { product: Product; languageT
                         suggested
                     />
                 </div>
-                <Reasoning>{suggestion.reasoning}</Reasoning>
+                <RecommendationRationale>{suggestion.reasoning}</RecommendationRationale>
             </CardContent>
         </Card>
     );
@@ -388,7 +387,7 @@ function FeatureComparison({ product, languageTag }: { product: Product; languag
                         suggested
                     />
                 </div>
-                <Reasoning>{suggestion.reasoning}</Reasoning>
+                <RecommendationRationale>{suggestion.reasoning}</RecommendationRationale>
             </CardContent>
         </Card>
     );
@@ -423,7 +422,7 @@ function DescriptionComparison({ product, languageTag }: { product: Product; lan
                         suggested
                     />
                 </div>
-                <Reasoning>{suggestion.reasoning}</Reasoning>
+                <RecommendationRationale>{suggestion.reasoning}</RecommendationRationale>
             </CardContent>
         </Card>
     );
@@ -544,28 +543,6 @@ function ListPanel({
     );
 }
 
-function ModelReasoning({ reasoning, open = false }: { reasoning: string; open?: boolean }) {
-    return (
-        <details className="group rounded-lg border border-primary/20 bg-background/60" open={open}>
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold marker:hidden select-none [&::-webkit-details-marker]:hidden">
-                <span className="inline-flex items-center gap-2">
-                    <Lightbulb className="size-3.5 text-primary" /> Model reasoning output
-                </span>
-                <ChevronRight className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
-            </summary>
-            <div className="border-t border-primary/15 p-3">
-                <p className="mb-2 text-xs leading-5 text-muted-foreground">
-                    Working notes may be incomplete. The validated suggestions and their editorial
-                    rationales remain the authoritative output.
-                </p>
-                <pre className="max-h-64 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
-                    {reasoning}
-                </pre>
-            </div>
-        </details>
-    );
-}
-
 function SuggestionRegenerator({
     market,
     product,
@@ -585,7 +562,7 @@ function SuggestionRegenerator({
     const [error, setError] = useState<string>();
     const [progress, setProgress] = useState<RegenerationProgress>();
     const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
-    const [lastRun, setLastRun] = useState<{ duration: number; reasoning?: string }>();
+    const [lastRun, setLastRun] = useState<{ duration: number }>();
     const startedAt = useRef<number | undefined>(undefined);
     const formId = `suggestion-feedback-${market}-${product.asin}`;
 
@@ -613,8 +590,6 @@ function SuggestionRegenerator({
         setElapsedMilliseconds(0);
         setLastRun(undefined);
         startedAt.current = Date.now();
-        let returnedReasoning: string | undefined;
-
         try {
             if (!product.reviewSentiment) {
                 throw new Error(
@@ -627,15 +602,12 @@ function SuggestionRegenerator({
                 { ...product, reviewSentiment: product.reviewSentiment },
                 product.suggestions,
                 additionalFeedback,
-                nextProgress => {
-                    if (nextProgress.reasoning) returnedReasoning = nextProgress.reasoning;
-                    setProgress(nextProgress);
-                }
+                setProgress
             );
             const duration = Date.now() - startedAt.current;
             onRegenerated(refinement);
             setElapsedMilliseconds(duration);
-            setLastRun({ duration, reasoning: returnedReasoning });
+            setLastRun({ duration });
             setFeedback("");
             setOpen(false);
         } catch (requestError) {
@@ -664,9 +636,8 @@ function SuggestionRegenerator({
                         <div>
                             <p className="font-semibold">Want to refine the recommendations?</p>
                             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                                Add product knowledge, keyword priorities, or editorial direction and ask{" "}
-                                {reportAiConfig.providerName} to reconsider the complete listing and
-                                refresh its English translation.
+                                Add product knowledge, keyword priorities, or editorial direction to
+                                reconsider the complete listing and refresh its English translation.
                             </p>
                         </div>
                     </div>
@@ -697,7 +668,6 @@ function SuggestionRegenerator({
                                 <RotateCcw /> Restore report suggestions
                             </Button>
                         </div>
-                        {lastRun?.reasoning && <ModelReasoning reasoning={lastRun.reasoning} />}
                     </div>
                 )}
 
@@ -708,13 +678,10 @@ function SuggestionRegenerator({
                         onSubmit={event => void submit(event)}
                     >
                         <div>
-                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <div className="mb-2">
                                 <label htmlFor={`${formId}-text`} className="text-sm font-semibold">
                                     Additional feedback
                                 </label>
-                                <Badge variant="outline">
-                                    {reportAiConfig.providerName} · {reportAiConfig.model}
-                                </Badge>
                             </div>
                             <Textarea
                                 id={`${formId}-text`}
@@ -746,8 +713,8 @@ function SuggestionRegenerator({
                                     <div className="min-w-0 flex-1">
                                         <p className="font-semibold" aria-live="polite">
                                             {progress.stage === "generating"
-                                                ? `${reportAiConfig.providerName} is analyzing the feedback and rewriting the listing…`
-                                                : `Suggestions are ready. ${reportAiConfig.providerName} is generating English translations…`}
+                                                ? "Analyzing the feedback and rewriting the listing…"
+                                                : "Suggestions are ready. Generating English translations…"}
                                         </p>
                                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                             <span className="font-mono tabular-nums">
@@ -779,10 +746,6 @@ function SuggestionRegenerator({
                                         English translation
                                     </div>
                                 </div>
-
-                                {progress.reasoning && (
-                                    <ModelReasoning reasoning={progress.reasoning} open />
-                                )}
                             </div>
                         )}
 
@@ -812,7 +775,7 @@ function SuggestionRegenerator({
                                 {loading ? (
                                     <>
                                         <LoaderCircle className="animate-spin" />
-                                        Working with {reportAiConfig.providerName}…
+                                        Generating…
                                     </>
                                 ) : (
                                     <>
@@ -1067,7 +1030,7 @@ function ReviewsView({
                 <CardHeader>
                     <CardTitle>Review overview</CardTitle>
                     <CardDescription>
-                        Aggregate data shown by Amazon. The qualitative AI corpus contains{" "}
+                        Aggregate data shown by Amazon. The qualitative review corpus contains{" "}
                         {reviews.items.length} reviews, with a collection ceiling of{" "}
                         {reviews.collection.limit}
                         {criticalCoverage > 0
@@ -1515,7 +1478,7 @@ function App() {
                                 <div className="flex flex-wrap items-end justify-between gap-3 py-2">
                                     <div>
                                         <p className="text-sm font-semibold text-primary">
-                                            AI recommendations
+                                            Recommendations
                                         </p>
                                         <h2 className="mt-1 text-2xl font-bold tracking-tight">
                                             Proposed optimizations

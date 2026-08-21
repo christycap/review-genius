@@ -34,8 +34,7 @@ const deepSeekResponseSchema = z.object({
             z.object({
                 finish_reason: z.string().nullable(),
                 message: z.object({
-                    content: z.string().nullable(),
-                    reasoning_content: z.string().nullable().optional()
+                    content: z.string().nullable()
                 })
             })
         )
@@ -78,26 +77,14 @@ class BrowserAiError extends Error {
 export type RegenerationProgress = {
     stage: "generating" | "translating";
     attempt: number;
-    reasoning?: string;
 };
 
 type GeneratedSuggestions = {
     suggestions: ProductSuggestions;
-    reasoning?: string;
 };
 
 function isRetryableStatus(status: number): boolean {
     return status === 408 || status === 429 || status >= 500;
-}
-
-function getApiErrorMessage(value: unknown, status: number): string {
-    const result = z
-        .object({
-            error: z.object({ message: z.string() })
-        })
-        .safeParse(value);
-
-    return result.success ? result.data.error.message : `HTTP ${status}`;
 }
 
 function normalizeText(value: string): string {
@@ -117,7 +104,7 @@ function suggestionValuesAreEqual(first: ProductSuggestions, second: ProductSugg
 }
 
 function validateResponse(
-    providerName: string,
+    serviceLabel: string,
     content: string,
     product: ScrapedProduct,
     currentSuggestions: ProductSuggestions | undefined
@@ -128,19 +115,19 @@ function validateResponse(
             currentSuggestions !== undefined &&
             suggestionValuesAreEqual(suggestions, currentSuggestions)
         ) {
-            throw new BrowserAiError(`${providerName} returned the current suggestion unchanged`, true);
+            throw new BrowserAiError(`${serviceLabel} returned the current suggestion unchanged`, true);
         }
 
         return suggestions;
     } catch (error) {
         if (error instanceof SuggestionValidationError) {
-            throw new BrowserAiError(`${providerName} ${error.message}`, true);
+            throw new BrowserAiError(`${serviceLabel} ${error.message}`, true);
         }
         throw error;
     }
 }
 
-async function readJsonResponse(response: Response, providerName: string): Promise<unknown> {
+async function readJsonResponse(response: Response, serviceLabel: string): Promise<unknown> {
     const responseText = await response.text();
     let responseValue: unknown;
 
@@ -149,15 +136,15 @@ async function readJsonResponse(response: Response, providerName: string): Promi
     } catch {
         throw new BrowserAiError(
             response.ok
-                ? `${providerName} returned a non-JSON response`
-                : `${providerName} returned HTTP ${response.status}`,
+                ? `${serviceLabel} returned a non-JSON response`
+                : `${serviceLabel} returned HTTP ${response.status}`,
             isRetryableStatus(response.status)
         );
     }
 
     if (!response.ok) {
         throw new BrowserAiError(
-            `${providerName}: ${getApiErrorMessage(responseValue, response.status)}`,
+            `${serviceLabel} returned HTTP ${response.status}`,
             isRetryableStatus(response.status)
         );
     }
@@ -166,7 +153,7 @@ async function readJsonResponse(response: Response, providerName: string): Promi
 }
 
 async function fetchFromBrowser(
-    providerName: string,
+    serviceLabel: string,
     input: RequestInfo | URL,
     init: RequestInit
 ): Promise<unknown> {
@@ -180,11 +167,11 @@ async function fetchFromBrowser(
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new BrowserAiError(
-            `${providerName} could not be reached from this browser (${message}). Check the internet connection, API key restrictions, and browser cross-origin policy.`
+            `${serviceLabel} could not be reached from this browser (${message}). Check the internet connection, API key restrictions, and browser cross-origin policy.`
         );
     }
 
-    return readJsonResponse(response, providerName);
+    return readJsonResponse(response, serviceLabel);
 }
 
 async function requestDeepSeekSuggestions(
@@ -194,7 +181,7 @@ async function requestDeepSeekSuggestions(
     currentSuggestions: ProductSuggestions | undefined,
     feedback: string
 ): Promise<GeneratedSuggestions> {
-    const responseValue = await fetchFromBrowser(config.providerName, DEEPSEEK_URL, {
+    const responseValue = await fetchFromBrowser("Suggestion service", DEEPSEEK_URL, {
         method: "POST",
         headers: {
             authorization: `Bearer ${config.apiKey}`,
@@ -224,7 +211,7 @@ async function requestDeepSeekSuggestions(
     const result = deepSeekResponseSchema.safeParse(responseValue);
     if (!result.success) {
         throw new BrowserAiError(
-            `DeepSeek returned an unexpected response: ${result.error.message}`,
+            `Suggestion service returned an unexpected response: ${result.error.message}`,
             true
         );
     }
@@ -232,19 +219,18 @@ async function requestDeepSeekSuggestions(
     const choice = result.data.choices[0];
     if (choice.finish_reason !== "stop") {
         throw new BrowserAiError(
-            `DeepSeek stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
+            `Suggestion service stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
             choice.finish_reason === "insufficient_system_resource"
         );
     }
 
     return {
         suggestions: validateResponse(
-            config.providerName,
+            "Suggestion service",
             choice.message.content ?? "",
             product,
             currentSuggestions
-        ),
-        reasoning: choice.message.reasoning_content?.trim() || undefined
+        )
     };
 }
 
@@ -256,7 +242,7 @@ async function requestGeminiSuggestions(
     feedback: string
 ): Promise<GeneratedSuggestions> {
     const responseValue = await fetchFromBrowser(
-        config.providerName,
+        "Suggestion service",
         `${GEMINI_API_BASE_URL}/${encodeURIComponent(config.model)}:generateContent`,
         {
             method: "POST",
@@ -285,7 +271,7 @@ async function requestGeminiSuggestions(
                 ],
                 generationConfig: {
                     maxOutputTokens: 32_768,
-                    thinkingConfig: { includeThoughts: true },
+                    thinkingConfig: { includeThoughts: false },
                     responseFormat: {
                         text: {
                             mimeType: "APPLICATION_JSON",
@@ -300,7 +286,7 @@ async function requestGeminiSuggestions(
     const result = geminiResponseSchema.safeParse(responseValue);
     if (!result.success) {
         throw new BrowserAiError(
-            `Gemini returned an unexpected response: ${result.error.message}`,
+            `Suggestion service returned an unexpected response: ${result.error.message}`,
             true
         );
     }
@@ -308,7 +294,7 @@ async function requestGeminiSuggestions(
     const candidate = result.data.candidates[0];
     if (candidate.finishReason !== "STOP") {
         throw new BrowserAiError(
-            `Gemini stopped with finish reason ${candidate.finishReason ?? "unknown"}`,
+            `Suggestion service stopped with finish reason ${candidate.finishReason ?? "unknown"}`,
             candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "OTHER"
         );
     }
@@ -318,26 +304,18 @@ async function requestGeminiSuggestions(
             .filter(part => part.thought !== true)
             .map(part => part.text ?? "")
             .join("") ?? "";
-    const reasoning =
-        candidate.content?.parts
-            .filter(part => part.thought === true)
-            .map(part => part.text ?? "")
-            .join("")
-            .trim() || undefined;
-
     return {
-        suggestions: validateResponse(config.providerName, content, product, currentSuggestions),
-        reasoning
+        suggestions: validateResponse("Suggestion service", content, product, currentSuggestions)
     };
 }
 
 function validateTranslationResponse(
-    providerName: string,
+    serviceLabel: string,
     content: string,
     suggestions: ProductSuggestions
 ): ListingEnglishTranslations {
     try {
-        return parseAndValidateListingEnglishTranslations(content, suggestions, providerName);
+        return parseAndValidateListingEnglishTranslations(content, suggestions, serviceLabel);
     } catch (error) {
         if (error instanceof TranslationValidationError) {
             throw new BrowserAiError(error.message, true);
@@ -351,7 +329,7 @@ async function requestDeepSeekTranslations(
     market: Market,
     suggestions: ProductSuggestions
 ): Promise<ListingEnglishTranslations> {
-    const responseValue = await fetchFromBrowser(config.providerName, DEEPSEEK_URL, {
+    const responseValue = await fetchFromBrowser("Translation service", DEEPSEEK_URL, {
         method: "POST",
         headers: {
             authorization: `Bearer ${config.apiKey}`,
@@ -377,7 +355,7 @@ async function requestDeepSeekTranslations(
     const result = deepSeekResponseSchema.safeParse(responseValue);
     if (!result.success) {
         throw new BrowserAiError(
-            `DeepSeek returned an unexpected translation response: ${result.error.message}`,
+            `Translation service returned an unexpected response: ${result.error.message}`,
             true
         );
     }
@@ -385,12 +363,12 @@ async function requestDeepSeekTranslations(
     const choice = result.data.choices[0];
     if (choice.finish_reason !== "stop") {
         throw new BrowserAiError(
-            `DeepSeek translation stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
+            `Translation service stopped with finish reason ${choice.finish_reason ?? "unknown"}`,
             choice.finish_reason === "insufficient_system_resource"
         );
     }
 
-    return validateTranslationResponse(config.providerName, choice.message.content ?? "", suggestions);
+    return validateTranslationResponse("Translation service", choice.message.content ?? "", suggestions);
 }
 
 async function requestGeminiTranslations(
@@ -399,7 +377,7 @@ async function requestGeminiTranslations(
     suggestions: ProductSuggestions
 ): Promise<ListingEnglishTranslations> {
     const responseValue = await fetchFromBrowser(
-        config.providerName,
+        "Translation service",
         `${GEMINI_API_BASE_URL}/${encodeURIComponent(config.model)}:generateContent`,
         {
             method: "POST",
@@ -437,7 +415,7 @@ async function requestGeminiTranslations(
     const result = geminiResponseSchema.safeParse(responseValue);
     if (!result.success) {
         throw new BrowserAiError(
-            `Gemini returned an unexpected translation response: ${result.error.message}`,
+            `Translation service returned an unexpected response: ${result.error.message}`,
             true
         );
     }
@@ -445,7 +423,7 @@ async function requestGeminiTranslations(
     const candidate = result.data.candidates[0];
     if (candidate.finishReason !== "STOP") {
         throw new BrowserAiError(
-            `Gemini translation stopped with finish reason ${candidate.finishReason ?? "unknown"}`,
+            `Translation service stopped with finish reason ${candidate.finishReason ?? "unknown"}`,
             candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "OTHER"
         );
     }
@@ -456,7 +434,7 @@ async function requestGeminiTranslations(
             .map(part => part.text ?? "")
             .join("") ?? "";
 
-    return validateTranslationResponse(config.providerName, content, suggestions);
+    return validateTranslationResponse("Translation service", content, suggestions);
 }
 
 async function retryBrowserRequest<T>(request: (attempt: number) => Promise<T>): Promise<T> {
@@ -472,7 +450,7 @@ async function retryBrowserRequest<T>(request: (attempt: number) => Promise<T>):
         }
     }
 
-    throw new BrowserAiError("AI request failed unexpectedly");
+    throw new BrowserAiError("The request failed unexpectedly");
 }
 
 export async function regenerateSuggestions(
@@ -490,7 +468,7 @@ export async function regenerateSuggestions(
             : requestGeminiSuggestions(config, market, product, currentSuggestions, feedback);
     });
     const englishTranslations = await retryBrowserRequest(attempt => {
-        onProgress?.({ stage: "translating", attempt, reasoning: generated.reasoning });
+        onProgress?.({ stage: "translating", attempt });
         return config.provider === "deepseek"
             ? requestDeepSeekTranslations(config, market, generated.suggestions)
             : requestGeminiTranslations(config, market, generated.suggestions);

@@ -61,12 +61,6 @@ function countListCharacters(values: string[]): number {
     return values.reduce((total, value) => total + countCharacters(value), 0);
 }
 
-function providerName(provider: StoredProduct["suggestionProvider"]): string {
-    if (provider === "deepseek") return "DeepSeek";
-    if (provider === "gemini") return "Gemini";
-    return "";
-}
-
 function formatSelectionReason(
     reason: StoredProduct["reviews"]["items"][number]["selectionReason"]
 ): string {
@@ -180,7 +174,6 @@ function addOverviewSheet(
         { width: 18 },
         { width: 14 },
         { width: 14 },
-        { width: 24 },
         { width: 18 }
     ];
     styleBanner(
@@ -189,10 +182,10 @@ function addOverviewSheet(
         `${output.title} · ${MARKET_NAMES[market]} (${market}) · ${products.length} product${
             products.length === 1 ? "" : "s"
         }`,
-        11
+        10
     );
 
-    worksheet.mergeCells("A3:K3");
+    worksheet.mergeCells("A3:J3");
     worksheet.getCell("A3").value =
         "Use the product links to inspect Amazon listings and the analysis links to open the detailed recommendation for each ASIN.";
     worksheet.getCell("A3").font = { italic: true, color: { argb: COLORS.grey }, size: 10 };
@@ -210,10 +203,9 @@ function addOverviewSheet(
         "Extracted reviews",
         "Positive",
         "Negative",
-        "Suggestion model",
         "Product analysis"
     ];
-    styleTableHeader(header, 11);
+    styleTableHeader(header, 10);
 
     products.forEach((product, index) => {
         const classifications = product.reviewSentiment?.classifications ?? [];
@@ -233,15 +225,12 @@ function addOverviewSheet(
             product.reviews.items.length,
             positiveCount,
             negativeCount,
-            [providerName(product.suggestionProvider), product.suggestionModel]
-                .filter(Boolean)
-                .join(" · "),
             internalSheetLink(productSheetNames.get(product.asin) ?? product.asin, "Open analysis")
         ]);
         row.height = 64;
-        styleDataRow(row, 11, index % 2 === 0 ? COLORS.white : COLORS.greyPale);
+        styleDataRow(row, 10, index % 2 === 0 ? COLORS.white : COLORS.greyPale);
         row.getCell(2).font = { color: { argb: COLORS.tealDark }, underline: true, size: 10 };
-        row.getCell(11).font = {
+        row.getCell(10).font = {
             bold: true,
             color: { argb: COLORS.tealDark },
             underline: true,
@@ -265,7 +254,7 @@ function addOverviewSheet(
         };
     });
 
-    worksheet.autoFilter = { from: "A4", to: `K${Math.max(4, worksheet.rowCount)}` };
+    worksheet.autoFilter = { from: "A4", to: `J${Math.max(4, worksheet.rowCount)}` };
     worksheet.pageSetup = {
         orientation: "landscape",
         fitToPage: true,
@@ -285,7 +274,7 @@ type CopyComparison = {
     suggested: string;
     suggestedEnglish: string;
     suggestedCharacters?: number;
-    reasoning: string;
+    rationale: string;
 };
 
 function createCopyComparisons(product: StoredProduct): CopyComparison[] {
@@ -302,7 +291,7 @@ function createCopyComparisons(product: StoredProduct): CopyComparison[] {
             suggestedEnglish: translations?.suggestions.title ?? "",
             suggestedCharacters:
                 suggestions === undefined ? undefined : countCharacters(suggestions.title.value),
-            reasoning: suggestions?.title.reasoning ?? ""
+            rationale: suggestions?.title.reasoning ?? ""
         },
         {
             field: "Product features",
@@ -315,7 +304,7 @@ function createCopyComparisons(product: StoredProduct): CopyComparison[] {
                 suggestions === undefined
                     ? undefined
                     : countListCharacters(suggestions.productFeatures.value),
-            reasoning: suggestions?.productFeatures.reasoning ?? ""
+            rationale: suggestions?.productFeatures.reasoning ?? ""
         },
         {
             field: "Description",
@@ -326,7 +315,7 @@ function createCopyComparisons(product: StoredProduct): CopyComparison[] {
             suggestedEnglish: translations?.suggestions.description ?? "",
             suggestedCharacters:
                 suggestions === undefined ? undefined : countCharacters(suggestions.description.value),
-            reasoning: suggestions?.description.reasoning ?? ""
+            rationale: suggestions?.description.reasoning ?? ""
         }
     ];
 }
@@ -340,7 +329,7 @@ function addProductSheet(
 ): void {
     const worksheet = workbook.addWorksheet(sheetName, {
         properties: { tabColor: { argb: COLORS.teal } },
-        views: [{ state: "frozen", ySplit: 6, topLeftCell: "A7", showGridLines: false }]
+        views: [{ state: "frozen", ySplit: 5, topLeftCell: "A6", showGridLines: false }]
     });
     worksheet.columns = [
         { width: 20 },
@@ -408,26 +397,7 @@ function addProductSheet(
     styleMetadataValue(worksheet.getCell("I4"));
     worksheet.getRow(4).height = 28;
 
-    worksheet.getCell("A5").value = "AI provider";
-    styleMetadataLabel(worksheet.getCell("A5"));
-    worksheet.getCell("B5").value = providerName(product.suggestionProvider);
-    styleMetadataValue(worksheet.getCell("B5"));
-    worksheet.getCell("C5").value = "Model";
-    styleMetadataLabel(worksheet.getCell("C5"));
-    worksheet.mergeCells("D5:E5");
-    worksheet.getCell("D5").value = product.suggestionModel ?? "";
-    styleMetadataValue(worksheet.getCell("D5"));
-    worksheet.getCell("F5").value = "Prompt version";
-    styleMetadataLabel(worksheet.getCell("F5"));
-    worksheet.getCell("G5").value = product.suggestionPromptVersion ?? "";
-    styleMetadataValue(worksheet.getCell("G5"));
-    worksheet.getCell("H5").value = "Market";
-    styleMetadataLabel(worksheet.getCell("H5"));
-    worksheet.getCell("I5").value = `${MARKET_NAMES[market]} (${market})`;
-    styleMetadataValue(worksheet.getCell("I5"));
-    worksheet.getRow(5).height = 28;
-
-    const tableHeader = worksheet.getRow(6);
+    const tableHeader = worksheet.getRow(5);
     tableHeader.values = [
         "Element",
         "Current copy (market language)",
@@ -437,7 +407,7 @@ function addProductSheet(
         "Suggested copy (English)",
         "Suggested chars",
         "Δ chars",
-        "Reasoning (English)"
+        "Recommendation rationale (English)"
     ];
     styleTableHeader(tableHeader, 9);
 
@@ -455,7 +425,7 @@ function addProductSheet(
             safeCellText(comparison.suggestedEnglish),
             comparison.suggestedCharacters ?? "",
             difference,
-            safeCellText(comparison.reasoning)
+            safeCellText(comparison.rationale)
         ]);
         row.height = index === 0 ? 90 : index === 1 ? 180 : 220;
         styleDataRow(row, 9, index % 2 === 0 ? COLORS.white : COLORS.greyPale);
@@ -509,7 +479,7 @@ function addProductSheet(
         }
     });
 
-    const insightHeaderRow = 11;
+    const insightHeaderRow = 10;
     worksheet.mergeCells(insightHeaderRow, 1, insightHeaderRow, 9);
     const insightHeader = worksheet.getCell(insightHeaderRow, 1);
     insightHeader.value = "Review insights";
@@ -563,7 +533,7 @@ function addProductSheet(
         fitToWidth: 1,
         fitToHeight: 0,
         paperSize: 9,
-        printArea: "A1:I14",
+        printArea: "A1:I13",
         margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
     };
     worksheet.headerFooter.oddFooter = `&LReview Genius 2.0&C${product.asin}&RPage &P of &N`;
@@ -781,8 +751,8 @@ function createMarketWorkbook(
     workbook.title = `${output.title} · ${MARKET_NAMES[market]} recommendations`;
     workbook.subject = "Amazon listing recommendations and review evidence";
     workbook.description =
-        "Original Amazon listing copy, AI suggestions, English translations, reasoning, sentiment summaries, and extracted reviews.";
-    workbook.keywords = "Amazon, ecommerce, recommendations, reviews, AI, Numberly";
+        "Original Amazon listing copy, recommendations, English translations, recommendation rationales, sentiment summaries, and extracted reviews.";
+    workbook.keywords = "Amazon, ecommerce, recommendations, reviews, Numberly";
     workbook.calcProperties.fullCalcOnLoad = true;
 
     const productSheetNames = createProductSheetNames(products);

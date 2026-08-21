@@ -170,7 +170,7 @@ The build produces the following deliverables:
 
 -   [`output/Smartbox_2026.html`](output/Smartbox_2026.html): a single-file website containing its CSS, JavaScript, favicon, logo, product images, report data, and AI configuration.
 -   [`output/Smartbox_2026.json`](output/Smartbox_2026.json): the readable deterministic dataset, also used to resume future builds.
--   `output/Smartbox_2026_fr.xlsx`, `output/Smartbox_2026_es.xlsx`, and equivalent files for every enabled market: client-ready workbooks with an overview, one detailed worksheet per ASIN, and the extracted review corpus. Product worksheets compare original and suggested copy, include English translations and character deltas, explain the reasoning for every suggestion, and summarize positive, negative, and overall review sentiment.
+-   `output/Smartbox_2026_fr.xlsx`, `output/Smartbox_2026_es.xlsx`, and equivalent files for every enabled market: client-ready workbooks with an overview, one detailed worksheet per ASIN, and the extracted review corpus. Product worksheets compare original and suggested copy, include English translations and character deltas, explain the rationale for every recommendation, and summarize positive, negative, and overall review sentiment. Client-facing HTML and Excel files intentionally omit provider/model metadata and internal model working notes.
 
 Open the HTML file directly in a browser. No web server or internet connection is required to browse the report or reveal translations; all initial translations are embedded at build time. An internet connection is required only when regenerating suggestions.
 
@@ -184,7 +184,7 @@ open output/Smartbox_2026.html
 
 For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, persisted sentiment summaries, current suggestions, and additional feedback to the provider and model selected during the build. Individual review bodies are not included in this optimization request. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
 
-While the request runs, the report shows the active generation or translation stage, elapsed time, and retry attempt. If the provider returns DeepSeek reasoning content or a Gemini thought summary, it is exposed as expandable working notes; the validated field-level rationales remain the authoritative explanation of the final proposal.
+While the request runs, the report shows the active generation or translation stage, elapsed time, and retry attempt. Internal model working notes are neither requested for display nor exposed; only the validated field-level recommendation rationales accompany the final proposal.
 
 The refined title, features, description, English rationales, and English translations replace the displayed proposal as one unit. They are saved in that browser's local storage and can be restored to the report's original suggestions from the same panel. Browser refinements do not rewrite `output/Smartbox_2026.json`.
 

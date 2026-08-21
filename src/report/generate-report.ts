@@ -213,6 +213,17 @@ async function createEmbeddedReportData(data: StoredOutput): Promise<StoredOutpu
 
     for (const group of embeddedData.markets) {
         for (const product of group.products) {
+            delete product.suggestionPromptVersion;
+            delete product.suggestionProvider;
+            delete product.suggestionModel;
+            delete product.sentimentPromptVersion;
+            delete product.sentimentProvider;
+            delete product.sentimentModel;
+            delete product.sentimentSourceHash;
+            delete product.translationPromptVersion;
+            delete product.translationProvider;
+            delete product.translationModel;
+            delete product.translationSourceHash;
             product.productImageUrl = await createEmbeddedProductImage(
                 group.market,
                 product.asin,
