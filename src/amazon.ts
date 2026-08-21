@@ -1,75 +1,15 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { load } from "cheerio";
+import { createAmazonPage, waitForAmazonAccess } from "./amazon-browser.js";
+import { amazonMarketplaces, getAmazonProductUrl } from "./amazon-marketplaces.js";
+import { collectAmazonReviews, parseHelpfulVoteCount } from "./amazon-reviews.js";
 import { runExternalRequest } from "./external-request.js";
+import { stripAmazonRatingFromReviewTitle } from "./review-title.js";
 import type { Market, ScrapedProduct } from "./schemas.js";
 
 const CACHE_DIRECTORY = path.resolve(".cache/amazon");
 const MAX_ATTEMPTS = 3;
-
-const countryNames: Record<Market, string[]> = {
-    fr: ["france", "francia", "frankreich"],
-    it: ["italy", "italia", "italie", "italien"],
-    es: ["spain", "españa", "espagne", "spagna", "spanien"],
-    de: ["germany", "germania", "allemagne", "deutschland", "duitsland"],
-    be: ["belgium", "belgique", "belgië", "belgie", "belgio", "belgien"],
-    nl: ["netherlands", "nederland", "pays-bas", "paesi bassi", "niederlande"]
-};
-
-const countriesOutsideSupportedMarkets = [
-    "united kingdom",
-    "regno unito",
-    "royaume-uni",
-    "vereinigtes königreich",
-    "verenigd koninkrijk",
-    "united states",
-    "stati uniti",
-    "états-unis",
-    "estados unidos",
-    "vereinigte staaten"
-];
-
-function getExcludedCountries(market: Market): string[] {
-    return [
-        ...Object.entries(countryNames)
-            .filter(([candidate]) => candidate !== market)
-            .flatMap(([, names]) => names),
-        ...countriesOutsideSupportedMarkets
-    ];
-}
-
-const marketplaces: Record<Market, { domain: string; language: string; excludedCountries: string[] }> = {
-    fr: {
-        domain: "amazon.fr",
-        language: "fr-FR,fr;q=0.9,en;q=0.5",
-        excludedCountries: getExcludedCountries("fr")
-    },
-    it: {
-        domain: "amazon.it",
-        language: "it-IT,it;q=0.9,en;q=0.5",
-        excludedCountries: getExcludedCountries("it")
-    },
-    es: {
-        domain: "amazon.es",
-        language: "es-ES,es;q=0.9,en;q=0.5",
-        excludedCountries: getExcludedCountries("es")
-    },
-    de: {
-        domain: "amazon.de",
-        language: "de-DE,de;q=0.9,en;q=0.5",
-        excludedCountries: getExcludedCountries("de")
-    },
-    be: {
-        domain: "amazon.com.be",
-        language: "nl-BE,nl;q=0.9,fr-BE;q=0.8,fr;q=0.7,en;q=0.5",
-        excludedCountries: getExcludedCountries("be")
-    },
-    nl: {
-        domain: "amazon.nl",
-        language: "nl-NL,nl;q=0.9,en;q=0.5",
-        excludedCountries: getExcludedCountries("nl")
-    }
-};
 
 export class AmazonScrapingError extends Error {}
 
@@ -136,7 +76,7 @@ async function readCachedHtml(cachePath: string): Promise<string | undefined> {
 }
 
 async function fetchHtml(market: Market, asin: string): Promise<string> {
-    const marketplace = marketplaces[market];
+    const marketplace = amazonMarketplaces[market];
     const cachePath = path.join(CACHE_DIRECTORY, market, `${asin}.html`);
     const cached = await readCachedHtml(cachePath);
 
@@ -145,7 +85,7 @@ async function fetchHtml(market: Market, asin: string): Promise<string> {
         return cached;
     }
 
-    const url = `https://www.${marketplace.domain}/dp/${asin}`;
+    const url = getAmazonProductUrl(market, asin);
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
@@ -177,9 +117,7 @@ async function fetchHtml(market: Market, asin: string): Promise<string> {
             return html;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            if (attempt === MAX_ATTEMPTS) {
-                throw new AmazonScrapingError(message);
-            }
+            if (attempt === MAX_ATTEMPTS) break;
 
             const waitMilliseconds = 1_000 * 2 ** (attempt - 1);
             console.warn(`    Amazon request failed: ${message}. Retrying in ${waitMilliseconds}ms...`);
@@ -187,7 +125,30 @@ async function fetchHtml(market: Market, asin: string): Promise<string> {
         }
     }
 
-    throw new AmazonScrapingError("Amazon request failed unexpectedly");
+    console.warn("    Direct Amazon fetch failed; retrying in the authenticated browser...");
+    return runExternalRequest(async () => {
+        const page = await createAmazonPage(market);
+
+        try {
+            const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+            await waitForAmazonAccess(page, market, asin);
+            if (response && !response.ok() && page.url() === response.url()) {
+                throw new AmazonScrapingError(`Amazon returned HTTP ${response.status()}`);
+            }
+            const html = await page.content();
+            if (!looksLikeAmazonPage(html)) {
+                throw new AmazonScrapingError(
+                    "Amazon returned a challenge or incomplete product page in the browser"
+                );
+            }
+
+            await mkdir(path.dirname(cachePath), { recursive: true });
+            await writeFile(cachePath, html);
+            return html;
+        } finally {
+            await page.close().catch(() => undefined);
+        }
+    });
 }
 
 function extractImageUrl(attributes: Record<string, string | undefined>): string {
@@ -238,7 +199,7 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
         "data-a-dynamic-image": image.attr("data-a-dynamic-image"),
         src: image.attr("src")
     });
-    const excludedCountries = marketplaces[market].excludedCountries;
+    const excludedCountries = amazonMarketplaces[market].excludedCountries;
     const seenReviews = new Set<string>();
     const ratingText =
         $("#acrPopover").first().attr("title") ??
@@ -284,7 +245,7 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
         const legacyTitle =
             cleanReviewText(legacyTitleElement.find("span").last().text()) ||
             cleanReviewText(legacyTitleElement.text());
-        const title = modernTitle || legacyTitle || null;
+        const title = stripAmazonRatingFromReviewTitle(modernTitle || legacyTitle || null);
         const ratingText = cleanText(
             review
                 .find('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')
@@ -300,9 +261,25 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
         }
 
         reviewItems.push({
+            id: review.attr("id") ?? null,
             rating: rating as 1 | 2 | 3 | 4 | 5,
             title,
-            comment: body
+            comment: body,
+            date: null,
+            dateText,
+            verifiedPurchase: review.find('[data-hook="avp-badge"]').length > 0,
+            reviewedAsin: null,
+            variant: cleanText(review.find('[data-hook="format-strip"]').first().text()) || null,
+            sourceLanguage:
+                review.attr("data-sourcelanguage") ?? review.find("[lang]").first().attr("lang") ?? null,
+            helpfulCount: parseHelpfulVoteCount(
+                review
+                    .find('[data-hook="helpful-vote-statement"], .cr-vote-text')
+                    .first()
+                    .attr("aria-label") ??
+                    review.find('[data-hook="helpful-vote-statement"], .cr-vote-text').first().text()
+            ),
+            selectionReason: "embedded-top"
         });
         seenReviews.add(identity);
     });
@@ -310,12 +287,24 @@ function parseProduct(html: string, market: Market, asin: string): ScrapedProduc
     const reviews: ScrapedProduct["reviews"] = {
         overallRating: overallRating ?? 0,
         totalCount: totalCount ?? 0,
-        items: reviewItems
+        items: reviewItems,
+        collection: {
+            strategy: "embedded-top",
+            limit: 30,
+            collectedAt: null,
+            pagesVisited: 0,
+            complete: false,
+            scraperVersion: 1,
+            corpusHash: null
+        }
     };
 
     return { asin, title, productFeatures, description, productImageUrl, reviews };
 }
 
 export async function fetchProduct(market: Market, asin: string): Promise<ScrapedProduct> {
-    return parseProduct(await fetchHtml(market, asin), market, asin);
+    const html = await fetchHtml(market, asin);
+    const product = parseProduct(html, market, asin);
+    const reviews = await collectAmazonReviews(market, asin, html, product.reviews);
+    return { ...product, reviews };
 }

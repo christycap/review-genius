@@ -1,8 +1,21 @@
-import { DEEPSEEK_MODEL, suggestProductImprovementsWithDeepSeek } from "./deepseek.js";
-import { suggestProductImprovementsWithGemini } from "./gemini.js";
+import {
+    analyzeReviewSentimentWithDeepSeek,
+    DEEPSEEK_MODEL,
+    suggestProductImprovementsWithDeepSeek,
+    translateProductContentWithDeepSeek
+} from "./deepseek.js";
+import {
+    analyzeReviewSentimentWithGemini,
+    suggestProductImprovementsWithGemini,
+    translateProductContentWithGemini
+} from "./gemini.js";
 import {
     type Market,
+    type ProductEnglishTranslations,
+    type ProductOptimizationProduct,
+    type ProductReviews,
     type ProductSuggestions,
+    type ReviewSentimentAnalysis,
     type ScrapedProduct,
     type SuggestionProvider
 } from "./schemas.js";
@@ -12,12 +25,17 @@ export type SuggestionService = {
     providerName: "DeepSeek" | "Gemini";
     model: string;
     reportConfig: ReportAiConfig;
-    suggest: (market: Market, product: ScrapedProduct) => Promise<ProductSuggestions>;
+    suggest: (market: Market, product: ProductOptimizationProduct) => Promise<ProductSuggestions>;
+    analyzeReviews: (market: Market, reviews: ProductReviews) => Promise<ReviewSentimentAnalysis>;
+    translate: (
+        market: Market,
+        product: ScrapedProduct,
+        suggestions: ProductSuggestions
+    ) => Promise<ProductEnglishTranslations>;
 };
 
 export type ReportAiConfig = {
     provider: SuggestionProvider;
-    providerName: "DeepSeek" | "Gemini";
     model: string;
     apiKey: string;
 };
@@ -42,18 +60,21 @@ export function createSuggestionService(
     if (deepSeekApiKey) {
         const reportConfig: ReportAiConfig = {
             provider: "deepseek",
-            providerName: "DeepSeek",
             model: DEEPSEEK_MODEL,
             apiKey: deepSeekApiKey
         };
 
         return {
             provider: reportConfig.provider,
-            providerName: reportConfig.providerName,
+            providerName: "DeepSeek",
             model: reportConfig.model,
             reportConfig,
+            analyzeReviews: (market, reviews) =>
+                analyzeReviewSentimentWithDeepSeek(deepSeekApiKey, market, reviews),
             suggest: (market, product) =>
-                suggestProductImprovementsWithDeepSeek(deepSeekApiKey, market, product)
+                suggestProductImprovementsWithDeepSeek(deepSeekApiKey, market, product),
+            translate: (market, product, suggestions) =>
+                translateProductContentWithDeepSeek(deepSeekApiKey, market, product, suggestions)
         };
     }
 
@@ -72,18 +93,21 @@ export function createSuggestionService(
 
         const reportConfig: ReportAiConfig = {
             provider: "gemini",
-            providerName: "Gemini",
             model,
             apiKey: geminiApiKey
         };
 
         return {
             provider: reportConfig.provider,
-            providerName: reportConfig.providerName,
+            providerName: "Gemini",
             model: reportConfig.model,
             reportConfig,
+            analyzeReviews: (market, reviews) =>
+                analyzeReviewSentimentWithGemini(geminiApiKey, model, market, reviews),
             suggest: (market, product) =>
-                suggestProductImprovementsWithGemini(geminiApiKey, model, market, product)
+                suggestProductImprovementsWithGemini(geminiApiKey, model, market, product),
+            translate: (market, product, suggestions) =>
+                translateProductContentWithGemini(geminiApiKey, model, market, product, suggestions)
         };
     }
 

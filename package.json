@@ -4,6 +4,7 @@
     "private": true,
     "type": "module",
     "scripts": {
+        "amazon:login": "node --import tsx src/amazon-login.ts",
         "build": "node --env-file=.env --import tsx src/index.ts",
         "_format": "prettier '**/*.{ts,tsx,json,md}'",
         "format": "npm run _format -- --write",
@@ -39,17 +40,26 @@
         "cheerio": "^1.2.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
+        "exceljs": "^4.4.0",
         "lucide-react": "^1.31.0",
+        "puppeteer": "25.8.0",
         "radix-ui": "^1.6.7",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "run-exclusive": "^2.2.19",
+        "sharp": "0.35.3",
         "tailwind-merge": "^3.6.0",
         "zod": "^4.4.3"
+    },
+    "overrides": {
+        "exceljs": {
+            "uuid": "^11.1.1"
+        }
     },
     "allowScripts": {
         "esbuild@0.28.2": true,
         "fsevents@2.3.3": true,
-        "husky@4.3.8": true
+        "husky@4.3.8": true,
+        "puppeteer@25.8.0": true
     }
 }

@@ -10,6 +10,7 @@ import {
     Lightbulb,
     ListChecks,
     LoaderCircle,
+    Languages,
     MessageSquarePlus,
     Moon,
     RotateCcw,
@@ -18,17 +19,29 @@ import {
     Star,
     Sun,
     Tag,
+    ThumbsDown,
+    ThumbsUp,
     UsersRound
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReportAiConfig } from "../ai.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "../prompts/product-optimization.js";
+import { createReviewKey } from "../review-key.js";
+import { stripAmazonRatingFromReviewTitle } from "../review-title.js";
 import {
-    suggestionsSchema,
+    refinedSuggestionsSchema,
+    SENTIMENT_PROMPT_VERSION,
+    TRANSLATION_PROMPT_VERSION,
+    type ListingEnglishTranslations,
     type Market,
+    type ProductEnglishTranslations,
     type ProductReviews,
     type ProductSuggestions,
+    type RefinedSuggestions,
+    type Review,
+    type ReviewSentiment,
+    type ReviewSentimentAnalysis,
     type ScrapedProduct
 } from "../schemas.js";
 import { Badge } from "./components/ui/badge.js";
@@ -39,11 +52,13 @@ import { Separator } from "./components/ui/separator.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs.js";
 import { Textarea } from "./components/ui/textarea.js";
 import { cn } from "./lib/utils.js";
-import { regenerateSuggestions } from "./regenerate-suggestions.js";
+import { regenerateSuggestions, type RegenerationProgress } from "./regenerate-suggestions.js";
 
 type Product = ScrapedProduct & {
-    suggestionPromptVersion?: number;
     suggestions?: ProductSuggestions;
+    reviewSentiment?: ReviewSentimentAnalysis;
+    englishTranslations?: ProductEnglishTranslations;
+    displayedSuggestionEnglishTranslations?: ListingEnglishTranslations;
 };
 type ReportData = {
     title: string;
@@ -52,18 +67,22 @@ type ReportData = {
 
 declare const __REPORT_DATA__: ReportData;
 declare const __REPORT_AI_CONFIG__: ReportAiConfig;
+declare const __REPORT_LOGO_URL__: string;
 
 const { title: reportTitle, markets: reportData } = __REPORT_DATA__;
 const reportAiConfig = __REPORT_AI_CONFIG__;
+const REPORT_NAME = "Review Genius";
 const REFINEMENT_STORAGE_KEY = [
     "review-genius-refinements",
     reportTitle,
     PRODUCT_OPTIMIZATION_PROMPT_VERSION,
+    SENTIMENT_PROMPT_VERSION,
+    TRANSLATION_PROMPT_VERSION,
     reportAiConfig.provider,
     reportAiConfig.model
 ].join(":");
 
-type SuggestionOverrides = Record<string, ProductSuggestions>;
+type SuggestionOverrides = Record<string, RefinedSuggestions>;
 
 function getProductKey(market: Market, asin: string): string {
     return `${market}/${asin}`;
@@ -75,8 +94,8 @@ function readSuggestionOverrides(): SuggestionOverrides {
         if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
 
         return Object.fromEntries(
-            Object.entries(value).flatMap(([key, suggestions]) => {
-                const result = suggestionsSchema.safeParse(suggestions);
+            Object.entries(value).flatMap(([key, refinement]) => {
+                const result = refinedSuggestionsSchema.safeParse(refinement);
                 return result.success ? [[key, result.data]] : [];
             })
         );
@@ -195,8 +214,61 @@ function CopyButton({ value, label = "Copy" }: { value: string; label?: string }
     );
 }
 
+function EnglishTranslationReveal({
+    children,
+    className,
+    buttonClassName
+}: {
+    children: React.ReactNode;
+    className?: string;
+    buttonClassName?: string;
+}) {
+    const [visible, setVisible] = useState(false);
+    const translationId = useId();
+
+    return (
+        <div className="mt-3">
+            <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn("h-7 px-2 text-xs text-muted-foreground", buttonClassName)}
+                onClick={() => setVisible(value => !value)}
+                aria-expanded={visible}
+                aria-controls={translationId}
+            >
+                <Languages className="size-3.5" />
+                {visible ? "Hide English translation" : "Show English translation"}
+            </Button>
+            {visible && (
+                <div
+                    id={translationId}
+                    lang="en"
+                    className={cn(
+                        "mt-2 border-l-2 border-primary/25 pl-3 text-sm leading-6 text-muted-foreground italic",
+                        className
+                    )}
+                >
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function countCharacters(value: string): number {
     return Array.from(value).length;
+}
+
+function formatElapsedTime(milliseconds: number): string {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes === 0) return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}${
+        seconds > 0 ? ` ${seconds} ${seconds === 1 ? "second" : "seconds"}` : ""
+    }`;
 }
 
 function CharacterMetrics({ count, originalCount }: { count: number; originalCount?: number }) {
@@ -227,12 +299,12 @@ function CharacterMetrics({ count, originalCount }: { count: number; originalCou
     );
 }
 
-function Reasoning({ children }: { children: string }) {
+function RecommendationRationale({ children }: { children: string }) {
     return (
         <div className="mt-5 flex gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm leading-6">
             <Lightbulb className="mt-0.5 size-4 shrink-0 text-primary" />
             <div>
-                <p className="mb-1 font-semibold text-primary">Reasoning</p>
+                <p className="mb-1 font-semibold text-primary">Recommendation rationale</p>
                 <p lang="en" className="text-muted-foreground">
                     {children}
                 </p>
@@ -263,16 +335,25 @@ function TitleComparison({ product, languageTag }: { product: Product; languageT
             </CardHeader>
             <CardContent>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <TextPanel label="Current title" languageTag={languageTag} value={product.title} />
+                    <TextPanel
+                        label="Current title"
+                        languageTag={languageTag}
+                        value={product.title}
+                        englishTranslation={product.englishTranslations?.original.title}
+                    />
                     <TextPanel
                         label="Suggested title"
                         languageTag={languageTag}
                         value={suggestion.value}
+                        englishTranslation={
+                            product.displayedSuggestionEnglishTranslations?.title ??
+                            product.englishTranslations?.suggestions.title
+                        }
                         originalValue={product.title}
                         suggested
                     />
                 </div>
-                <Reasoning>{suggestion.reasoning}</Reasoning>
+                <RecommendationRationale>{suggestion.reasoning}</RecommendationRationale>
             </CardContent>
         </Card>
     );
@@ -293,16 +374,21 @@ function FeatureComparison({ product, languageTag }: { product: Product; languag
                         label="Current features"
                         languageTag={languageTag}
                         values={product.productFeatures}
+                        englishTranslations={product.englishTranslations?.original.productFeatures}
                     />
                     <ListPanel
                         label="Suggested features"
                         languageTag={languageTag}
                         values={suggestion.value}
+                        englishTranslations={
+                            product.displayedSuggestionEnglishTranslations?.productFeatures ??
+                            product.englishTranslations?.suggestions.productFeatures
+                        }
                         originalValues={product.productFeatures}
                         suggested
                     />
                 </div>
-                <Reasoning>{suggestion.reasoning}</Reasoning>
+                <RecommendationRationale>{suggestion.reasoning}</RecommendationRationale>
             </CardContent>
         </Card>
     );
@@ -323,16 +409,21 @@ function DescriptionComparison({ product, languageTag }: { product: Product; lan
                         label="Current description"
                         languageTag={languageTag}
                         value={product.description}
+                        englishTranslation={product.englishTranslations?.original.description}
                     />
                     <TextPanel
                         label="Suggested description"
                         languageTag={languageTag}
                         value={suggestion.value}
+                        englishTranslation={
+                            product.displayedSuggestionEnglishTranslations?.description ??
+                            product.englishTranslations?.suggestions.description
+                        }
                         originalValue={product.description}
                         suggested
                     />
                 </div>
-                <Reasoning>{suggestion.reasoning}</Reasoning>
+                <RecommendationRationale>{suggestion.reasoning}</RecommendationRationale>
             </CardContent>
         </Card>
     );
@@ -342,12 +433,14 @@ function TextPanel({
     label,
     languageTag,
     value,
+    englishTranslation,
     originalValue,
     suggested = false
 }: {
     label: string;
     languageTag: string;
     value: string;
+    englishTranslation?: string;
     originalValue?: string;
     suggested?: boolean;
 }) {
@@ -376,6 +469,11 @@ function TextPanel({
             <p lang={languageTag} className="whitespace-pre-line text-sm leading-7">
                 {value || "—"}
             </p>
+            {englishTranslation !== undefined && value.trim() !== "" && (
+                <EnglishTranslationReveal>
+                    <p className="whitespace-pre-line">{englishTranslation || "—"}</p>
+                </EnglishTranslationReveal>
+            )}
         </div>
     );
 }
@@ -384,12 +482,14 @@ function ListPanel({
     label,
     languageTag,
     values,
+    englishTranslations,
     originalValues,
     suggested = false
 }: {
     label: string;
     languageTag: string;
     values: string[];
+    englishTranslations?: string[];
     originalValues?: string[];
     suggested?: boolean;
 }) {
@@ -428,8 +528,13 @@ function ListPanel({
                         >
                             {index + 1}
                         </span>
-                        <span lang={languageTag} className="min-w-0 flex-1">
-                            {value}
+                        <span className="min-w-0 flex-1">
+                            <span lang={languageTag}>{value}</span>
+                            {englishTranslations?.[index] !== undefined && (
+                                <EnglishTranslationReveal>
+                                    <span>{englishTranslations[index]}</span>
+                                </EnglishTranslationReveal>
+                            )}
                         </span>
                         <CopyButton value={value} label={`Copy feature ${index + 1}`} />
                     </li>
@@ -449,14 +554,31 @@ function SuggestionRegenerator({
     market: Market;
     product: Product;
     refined: boolean;
-    onRegenerated: (suggestions: ProductSuggestions) => void;
+    onRegenerated: (refinement: RefinedSuggestions) => void;
     onRestore: () => void;
 }) {
     const [open, setOpen] = useState(false);
     const [feedback, setFeedback] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string>();
+    const [progress, setProgress] = useState<RegenerationProgress>();
+    const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
+    const [lastRun, setLastRun] = useState<{ duration: number }>();
+    const startedAt = useRef<number | undefined>(undefined);
     const formId = `suggestion-feedback-${market}-${product.asin}`;
+
+    useEffect(() => {
+        if (!loading || startedAt.current === undefined) return;
+
+        const updateElapsed = () => {
+            if (startedAt.current !== undefined) {
+                setElapsedMilliseconds(Date.now() - startedAt.current);
+            }
+        };
+        updateElapsed();
+        const interval = window.setInterval(updateElapsed, 1_000);
+        return () => window.clearInterval(interval);
+    }, [loading]);
 
     async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
@@ -465,22 +587,42 @@ function SuggestionRegenerator({
 
         setLoading(true);
         setError(undefined);
-
+        setProgress({ stage: "generating", attempt: 1 });
+        setElapsedMilliseconds(0);
+        setLastRun(undefined);
+        startedAt.current = Date.now();
         try {
-            const suggestions = await regenerateSuggestions(
+            if (!product.reviewSentiment) {
+                throw new Error(
+                    "Review sentiment analysis is unavailable for this product. Rebuild the report before regenerating suggestions."
+                );
+            }
+            const refinement = await regenerateSuggestions(
                 reportAiConfig,
                 market,
-                product,
+                { ...product, reviewSentiment: product.reviewSentiment },
                 product.suggestions,
-                additionalFeedback
+                additionalFeedback,
+                setProgress
             );
-            onRegenerated(suggestions);
+            const duration = Date.now() - startedAt.current;
+            onRegenerated(refinement);
+            setElapsedMilliseconds(duration);
+            setLastRun({ duration });
             setFeedback("");
             setOpen(false);
         } catch (requestError) {
-            setError(requestError instanceof Error ? requestError.message : String(requestError));
+            const duration = Date.now() - startedAt.current;
+            setElapsedMilliseconds(duration);
+            setError(
+                `${
+                    requestError instanceof Error ? requestError.message : String(requestError)
+                } Failed after ${formatElapsedTime(duration)}.`
+            );
         } finally {
             setLoading(false);
+            setProgress(undefined);
+            startedAt.current = undefined;
         }
     }
 
@@ -495,8 +637,8 @@ function SuggestionRegenerator({
                         <div>
                             <p className="font-semibold">Want to refine the recommendations?</p>
                             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                                Add product knowledge, keyword priorities, or editorial direction and ask{" "}
-                                {reportAiConfig.providerName} to reconsider the complete listing.
+                                Add product knowledge, keyword priorities, or editorial direction to
+                                reconsider the complete listing and refresh its English translation.
                             </p>
                         </div>
                     </div>
@@ -517,16 +659,16 @@ function SuggestionRegenerator({
                 </div>
 
                 {refined && !open && (
-                    <div
-                        className="flex flex-col gap-3 border-t border-primary/15 px-5 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                        role="status"
-                    >
-                        <span className="text-muted-foreground">
-                            Browser-refined suggestions are displayed and saved on this device.
-                        </span>
-                        <Button type="button" variant="ghost" size="sm" onClick={onRestore}>
-                            <RotateCcw /> Restore report suggestions
-                        </Button>
+                    <div className="space-y-3 border-t border-primary/15 px-5 py-3 text-sm">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-muted-foreground" role="status">
+                                Browser-refined suggestions are displayed and saved on this device.
+                                {lastRun && ` Completed in ${formatElapsedTime(lastRun.duration)}.`}
+                            </span>
+                            <Button type="button" variant="ghost" size="sm" onClick={onRestore}>
+                                <RotateCcw /> Restore report suggestions
+                            </Button>
+                        </div>
                     </div>
                 )}
 
@@ -537,13 +679,10 @@ function SuggestionRegenerator({
                         onSubmit={event => void submit(event)}
                     >
                         <div>
-                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <div className="mb-2">
                                 <label htmlFor={`${formId}-text`} className="text-sm font-semibold">
                                     Additional feedback
                                 </label>
-                                <Badge variant="outline">
-                                    {reportAiConfig.providerName} · {reportAiConfig.model}
-                                </Badge>
                             </div>
                             <Textarea
                                 id={`${formId}-text`}
@@ -565,6 +704,51 @@ function SuggestionRegenerator({
                                 <span className="font-mono">{feedback.length}/4,000</span>
                             </div>
                         </div>
+
+                        {loading && progress && (
+                            <div className="space-y-4 rounded-xl border border-primary/25 bg-primary/[0.045] p-4">
+                                <div className="flex items-start gap-3">
+                                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                        <LoaderCircle className="size-5 animate-spin" />
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="font-semibold" aria-live="polite">
+                                            {progress.stage === "generating"
+                                                ? "Analyzing the feedback and rewriting the listing…"
+                                                : "Suggestions are ready. Generating English translations…"}
+                                        </p>
+                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <span className="font-mono tabular-nums">
+                                                {formatElapsedTime(elapsedMilliseconds)} elapsed
+                                            </span>
+                                            {progress.attempt > 1 && (
+                                                <Badge variant="outline">
+                                                    Attempt {progress.attempt} of 3
+                                                </Badge>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-xs font-medium">
+                                    <div className="rounded-md bg-primary px-3 py-2 text-center text-primary-foreground">
+                                        {progress.stage === "generating"
+                                            ? "Generating suggestions"
+                                            : "Suggestions ready"}
+                                    </div>
+                                    <div
+                                        className={cn(
+                                            "rounded-md px-3 py-2 text-center",
+                                            progress.stage === "translating"
+                                                ? "bg-primary text-primary-foreground"
+                                                : "bg-muted text-muted-foreground"
+                                        )}
+                                    >
+                                        English translation
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {error && (
                             <div
@@ -592,7 +776,7 @@ function SuggestionRegenerator({
                                 {loading ? (
                                     <>
                                         <LoaderCircle className="animate-spin" />
-                                        Regenerating with {reportAiConfig.providerName}…
+                                        Generating…
                                     </>
                                 ) : (
                                     <>
@@ -619,75 +803,322 @@ function PendingSuggestions() {
     );
 }
 
-function ReviewsView({ reviews, languageTag }: { reviews: ProductReviews; languageTag: string }) {
+type ReviewEntry = {
+    index: number;
+    review: Review;
+    sentiment: ReviewSentiment;
+    translation?: ProductEnglishTranslations["reviews"][number];
+};
+
+function sortReviewsByEvidence(entries: ReviewEntry[]): ReviewEntry[] {
+    return [...entries].sort((left, right) => {
+        const helpfulDifference = right.review.helpfulCount - left.review.helpfulCount;
+        if (helpfulDifference !== 0) return helpfulDifference;
+
+        if (left.review.date !== right.review.date) {
+            if (left.review.date === null) return 1;
+            if (right.review.date === null) return -1;
+            return right.review.date.localeCompare(left.review.date);
+        }
+
+        return left.index - right.index;
+    });
+}
+
+function ReviewCard({ entry, languageTag }: { entry: ReviewEntry; languageTag: string }) {
+    const { review, translation, sentiment, index } = entry;
+    const reviewTitle = stripAmazonRatingFromReviewTitle(review.title);
+    const translatedTitle = stripAmazonRatingFromReviewTitle(translation?.title ?? null);
+    const helpfulLabel = `${review.helpfulCount.toLocaleString("en")} ${
+        review.helpfulCount === 1 ? "person" : "people"
+    } found this helpful`;
+
+    return (
+        <Card key={review.id ?? `${index}-${review.comment}`} className="gap-4 py-5">
+            <CardHeader className="px-5">
+                <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <RatingStars rating={review.rating} />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                                variant="outline"
+                                className={cn(
+                                    sentiment === "positive"
+                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                        : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
+                                )}
+                            >
+                                {sentiment === "positive" ? <ThumbsUp /> : <ThumbsDown />}
+                                {sentiment === "positive" ? "Positive" : "Negative"}
+                            </Badge>
+                            <Badge variant="outline">{review.rating}/5</Badge>
+                            {review.verifiedPurchase && (
+                                <Badge variant="secondary">Verified purchase</Badge>
+                            )}
+                            <CopyButton
+                                value={[reviewTitle, review.comment]
+                                    .filter((value): value is string => Boolean(value))
+                                    .join("\n\n")}
+                                label="Copy this review"
+                            />
+                        </div>
+                    </div>
+                    {reviewTitle && (
+                        <CardTitle
+                            lang={review.sourceLanguage ?? languageTag}
+                            className="text-base leading-6"
+                        >
+                            {reviewTitle}
+                        </CardTitle>
+                    )}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 font-medium text-foreground/70">
+                            <ThumbsUp className="size-3.5" /> {helpfulLabel}
+                        </span>
+                        {(review.dateText || review.variant) && (
+                            <span
+                                lang={review.sourceLanguage ?? languageTag}
+                                className="flex flex-wrap gap-x-3 gap-y-1"
+                            >
+                                {review.dateText && <span>{review.dateText}</span>}
+                                {review.variant && <span>{review.variant}</span>}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent
+                lang={review.sourceLanguage ?? languageTag}
+                className="px-5 text-sm leading-6 text-muted-foreground"
+            >
+                “{review.comment}”
+            </CardContent>
+            {translation && (
+                <div className="px-5">
+                    <EnglishTranslationReveal>
+                        <div className="space-y-2">
+                            {translatedTitle && (
+                                <p className="font-semibold text-foreground/75 not-italic">
+                                    {translatedTitle}
+                                </p>
+                            )}
+                            {(translation.dateText || translation.variant) && (
+                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                                    {translation.dateText && <span>{translation.dateText}</span>}
+                                    {translation.variant && <span>{translation.variant}</span>}
+                                </div>
+                            )}
+                            <p>“{translation.comment}”</p>
+                        </div>
+                    </EnglishTranslationReveal>
+                </div>
+            )}
+        </Card>
+    );
+}
+
+function SentimentReviewPanel({
+    sentiment,
+    summary,
+    entries,
+    languageTag
+}: {
+    sentiment: ReviewSentiment;
+    summary: string;
+    entries: ReviewEntry[];
+    languageTag: string;
+}) {
+    const positive = sentiment === "positive";
+
+    return (
+        <div className="space-y-4">
+            <Card
+                className={cn(
+                    positive
+                        ? "border-emerald-500/25 bg-emerald-500/[0.035]"
+                        : "border-red-500/25 bg-red-500/[0.035]"
+                )}
+            >
+                <CardHeader>
+                    <div className="flex items-center gap-2">
+                        <span
+                            className={cn(
+                                "flex size-8 items-center justify-center rounded-lg",
+                                positive
+                                    ? "bg-emerald-500/10 text-emerald-600"
+                                    : "bg-red-500/10 text-red-600"
+                            )}
+                        >
+                            {positive ? (
+                                <ThumbsUp className="size-4" />
+                            ) : (
+                                <ThumbsDown className="size-4" />
+                            )}
+                        </span>
+                        <CardTitle>
+                            {positive ? "Positive review summary" : "Negative review summary"}
+                        </CardTitle>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <p lang="en" className="text-sm leading-7 text-muted-foreground">
+                        {summary}
+                    </p>
+                </CardContent>
+            </Card>
+
+            {entries.length > 0 ? (
+                <div className="space-y-4">
+                    {entries.map(entry => (
+                        <ReviewCard
+                            key={entry.review.id ?? `${entry.index}-${entry.review.comment}`}
+                            entry={entry}
+                            languageTag={languageTag}
+                        />
+                    ))}
+                </div>
+            ) : (
+                <Card className="border-dashed">
+                    <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                        No {sentiment} reviews were present in the eligible extracted corpus.
+                    </CardContent>
+                </Card>
+            )}
+        </div>
+    );
+}
+
+function ReviewsView({
+    reviews,
+    sentimentAnalysis,
+    translations,
+    languageTag
+}: {
+    reviews: ProductReviews;
+    sentimentAnalysis?: ReviewSentimentAnalysis;
+    translations?: ProductEnglishTranslations["reviews"];
+    languageTag: string;
+}) {
+    const criticalCoverage = reviews.items.filter(
+        review => review.selectionReason === "critical"
+    ).length;
+    const collectedAt = reviews.collection.collectedAt
+        ? new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(
+              new Date(reviews.collection.collectedAt)
+          )
+        : undefined;
+    const sentimentByReviewKey = new Map(
+        sentimentAnalysis?.classifications.map(classification => [
+            classification.reviewKey,
+            classification.sentiment
+        ]) ?? []
+    );
+    const entries = reviews.items.flatMap((review, index): ReviewEntry[] => {
+        const sentiment = sentimentByReviewKey.get(createReviewKey(review, index));
+        return sentiment ? [{ index, review, sentiment, translation: translations?.[index] }] : [];
+    });
+    const positiveEntries = sortReviewsByEvidence(
+        entries.filter(entry => entry.sentiment === "positive")
+    );
+    const negativeEntries = sortReviewsByEvidence(
+        entries.filter(entry => entry.sentiment === "negative")
+    );
+    const defaultSentiment = positiveEntries.length > 0 ? "positive" : "negative";
+
     return (
         <div className="space-y-6">
             <Card>
                 <CardHeader>
                     <CardTitle>Review overview</CardTitle>
                     <CardDescription>
-                        Aggregate data shown by Amazon. {reviews.items.length} reviews were extracted to
-                        inform the recommendations.
+                        Aggregate data shown by Amazon. The qualitative review corpus contains{" "}
+                        {reviews.items.length} reviews, with a collection ceiling of{" "}
+                        {reviews.collection.limit}
+                        {criticalCoverage > 0
+                            ? `, including ${criticalCoverage} added for 1–3-star concern coverage`
+                            : ""}
+                        .
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="grid gap-4 sm:grid-cols-2">
-                    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
-                        <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                            Amazon overall rating
-                        </span>
-                        <span className="mt-3 text-5xl font-bold tracking-tight">
-                            {reviews.overallRating.toFixed(1)}
-                            <span className="text-xl text-muted-foreground">/5</span>
-                        </span>
-                        <RatingStars rating={reviews.overallRating} />
+                <CardContent className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
+                            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                                Amazon overall rating
+                            </span>
+                            <span className="mt-3 text-5xl font-bold tracking-tight">
+                                {reviews.overallRating.toFixed(1)}
+                                <span className="text-xl text-muted-foreground">/5</span>
+                            </span>
+                            <RatingStars rating={reviews.overallRating} />
+                        </div>
+                        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
+                            <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+                                Total review count
+                            </span>
+                            <span className="mt-3 text-5xl font-bold tracking-tight">
+                                {reviews.totalCount.toLocaleString("en")}
+                            </span>
+                            <span className="mt-1 inline-flex items-center gap-2 text-sm text-muted-foreground">
+                                <UsersRound className="size-4" /> Amazon customer reviews
+                            </span>
+                        </div>
                     </div>
-                    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-muted/40 p-6 text-center">
-                        <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                            Total review count
-                        </span>
-                        <span className="mt-3 text-5xl font-bold tracking-tight">
-                            {reviews.totalCount.toLocaleString("en")}
-                        </span>
-                        <span className="mt-1 inline-flex items-center gap-2 text-sm text-muted-foreground">
-                            <UsersRound className="size-4" /> Amazon customer reviews
-                        </span>
+
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+                        <p className="mb-2 text-xs font-semibold tracking-widest text-primary uppercase">
+                            Overall sentiment
+                        </p>
+                        <p lang="en" className="text-sm leading-7 text-muted-foreground">
+                            {sentimentAnalysis?.overallSummary ??
+                                "Sentiment analysis is not available for this product yet."}
+                        </p>
                     </div>
                 </CardContent>
             </Card>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-                {reviews.items.map((review, index) => (
-                    <Card key={`${index}-${review.comment}`} className="gap-4 py-5">
-                        <CardHeader className="px-5">
-                            <div className="space-y-3">
-                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <RatingStars rating={review.rating} />
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <Badge variant="outline">{review.rating}/5</Badge>
-                                        <CopyButton
-                                            value={[review.title, review.comment]
-                                                .filter((value): value is string => Boolean(value))
-                                                .join("\n\n")}
-                                            label="Copy this review"
-                                        />
-                                    </div>
-                                </div>
-                                {review.title && (
-                                    <CardTitle lang={languageTag} className="text-base leading-6">
-                                        {review.title}
-                                    </CardTitle>
-                                )}
-                            </div>
-                        </CardHeader>
-                        <CardContent
-                            lang={languageTag}
-                            className="px-5 text-sm leading-6 text-muted-foreground"
-                        >
-                            “{review.comment}”
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
+            {sentimentAnalysis && (
+                <Tabs defaultValue={defaultSentiment}>
+                    <TabsList className="grid w-full grid-cols-2 sm:w-[470px]">
+                        <TabsTrigger value="positive" aria-label="Positive sentiment reviews">
+                            <ThumbsUp />
+                            <span>
+                                Positive sentiment<span className="hidden sm:inline"> reviews</span> (
+                                {positiveEntries.length})
+                            </span>
+                        </TabsTrigger>
+                        <TabsTrigger value="negative" aria-label="Negative sentiment reviews">
+                            <ThumbsDown />
+                            <span>
+                                Negative sentiment<span className="hidden sm:inline"> reviews</span> (
+                                {negativeEntries.length})
+                            </span>
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="positive" className="mt-4">
+                        <SentimentReviewPanel
+                            sentiment="positive"
+                            summary={sentimentAnalysis.positiveSummary}
+                            entries={positiveEntries}
+                            languageTag={languageTag}
+                        />
+                    </TabsContent>
+                    <TabsContent value="negative" className="mt-4">
+                        <SentimentReviewPanel
+                            sentiment="negative"
+                            summary={sentimentAnalysis.negativeSummary}
+                            entries={negativeEntries}
+                            languageTag={languageTag}
+                        />
+                    </TabsContent>
+                </Tabs>
+            )}
+
+            <p className="text-center text-xs text-muted-foreground">
+                Review corpus collected with a recency-sorted balanced strategy
+                {collectedAt ? ` on ${collectedAt}` : ""}. Aggregate totals remain Amazon's full-listing
+                figures.
+            </p>
         </div>
     );
 }
@@ -724,6 +1155,16 @@ function ProductHero({ market, product }: { market: Market; product: Product }) 
                     >
                         {product.title}
                     </h1>
+                    {product.englishTranslations?.original.title && (
+                        <EnglishTranslationReveal
+                            buttonClassName="text-white/75 hover:bg-white/10 hover:text-white"
+                            className="border-white/30 text-white/75"
+                        >
+                            <p className="max-w-4xl text-base">
+                                {product.englishTranslations.original.title}
+                            </p>
+                        </EnglishTranslationReveal>
+                    )}
                     <div className="mt-6">
                         <Button asChild variant="secondary" size="sm">
                             <a
@@ -758,7 +1199,8 @@ function ProductNavigation({
         group?.products.filter(
             product =>
                 product.asin.toLocaleLowerCase().includes(normalizedQuery) ||
-                product.title.toLocaleLowerCase().includes(normalizedQuery)
+                product.title.toLocaleLowerCase().includes(normalizedQuery) ||
+                product.englishTranslations?.original.title.toLocaleLowerCase().includes(normalizedQuery)
         ) ?? [];
 
     return (
@@ -799,10 +1241,14 @@ function ProductNavigation({
                         </span>
                         <span className="min-w-0 flex-1">
                             <span
-                                lang={marketMetadata[market].languageTag}
+                                lang={
+                                    product.englishTranslations
+                                        ? "en"
+                                        : marketMetadata[market].languageTag
+                                }
                                 className="line-clamp-2 text-xs leading-4 font-medium"
                             >
-                                {product.title}
+                                {product.englishTranslations?.original.title ?? product.title}
                             </span>
                             <span
                                 className={cn(
@@ -847,9 +1293,9 @@ function MobileProductSelector({ market, asin }: { market: Market; asin: string 
                     <option
                         key={product.asin}
                         value={product.asin}
-                        lang={marketMetadata[market].languageTag}
+                        lang={product.englishTranslations ? "en" : marketMetadata[market].languageTag}
                     >
-                        {product.asin} — {product.title}
+                        {product.asin} — {product.englishTranslations?.original.title ?? product.title}
                     </option>
                 ))}
             </select>
@@ -883,10 +1329,10 @@ function Header({
         <header className="sticky top-0 z-30 border-b border-border/80 bg-background/90 backdrop-blur-xl">
             <div className="flex min-h-[88px] flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap sm:gap-4 sm:px-6 sm:py-0">
                 <div className="flex min-w-0 items-center gap-4">
-                    <img src="./assets/numberly-logo.svg" alt="Numberly" className="h-7 w-auto sm:h-9" />
+                    <img src={__REPORT_LOGO_URL__} alt="Numberly" className="h-7 w-auto sm:h-9" />
                     <Separator orientation="vertical" className="hidden h-8 sm:block" />
                     <div>
-                        <p className="text-sm font-bold tracking-tight sm:text-lg">Review Genius 2.0</p>
+                        <p className="text-sm font-bold tracking-tight sm:text-lg">{REPORT_NAME}</p>
                         <p className="text-xs text-muted-foreground">
                             <span className="font-medium text-foreground/80">{reportTitle}</span>
                             <span className="hidden sm:inline">
@@ -956,16 +1402,21 @@ function App() {
     );
     const product = group?.products.find(item => item.asin === selection.asin) ?? group?.products[0];
     const selectedProductKey = product ? getProductKey(group?.market ?? "fr", product.asin) : "";
-    const refinedSuggestions = suggestionOverrides[selectedProductKey];
+    const refinement = suggestionOverrides[selectedProductKey];
     const displayedProduct = product
-        ? { ...product, suggestions: refinedSuggestions ?? product.suggestions }
+        ? {
+              ...product,
+              suggestions: refinement?.suggestions ?? product.suggestions,
+              displayedSuggestionEnglishTranslations:
+                  refinement?.englishTranslations ?? product.englishTranslations?.suggestions
+          }
         : undefined;
 
-    function updateSuggestionOverride(suggestions: ProductSuggestions): void {
+    function updateSuggestionOverride(nextRefinement: RefinedSuggestions): void {
         if (!selectedProductKey) return;
 
         setSuggestionOverrides(current => {
-            const next = { ...current, [selectedProductKey]: suggestions };
+            const next = { ...current, [selectedProductKey]: nextRefinement };
             writeSuggestionOverrides(next);
             return next;
         });
@@ -1028,7 +1479,7 @@ function App() {
                                 <div className="flex flex-wrap items-end justify-between gap-3 py-2">
                                     <div>
                                         <p className="text-sm font-semibold text-primary">
-                                            AI recommendations
+                                            Recommendations
                                         </p>
                                         <h2 className="mt-1 text-2xl font-bold tracking-tight">
                                             Proposed optimizations
@@ -1043,7 +1494,7 @@ function App() {
                                     key={selectedProductKey}
                                     market={group.market}
                                     product={displayedProduct}
-                                    refined={refinedSuggestions !== undefined}
+                                    refined={refinement !== undefined}
                                     onRegenerated={updateSuggestionOverride}
                                     onRestore={restoreReportSuggestions}
                                 />
@@ -1063,13 +1514,17 @@ function App() {
                             <TabsContent value="reviews" className="mt-6">
                                 <ReviewsView
                                     reviews={product.reviews}
+                                    sentimentAnalysis={product.reviewSentiment}
+                                    translations={product.englishTranslations?.reviews}
                                     languageTag={marketMetadata[group.market].languageTag}
                                 />
                             </TabsContent>
                         </Tabs>
 
                         <footer className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t py-6 text-xs text-muted-foreground">
-                            <span>Review Genius 2.0 · {reportTitle} report</span>
+                            <span>
+                                {REPORT_NAME} · {reportTitle} report
+                            </span>
                             <span className="inline-flex items-center gap-1">
                                 Self-contained local report <ArrowRight className="size-3" />{" "}
                                 {marketMetadata[group.market].label}

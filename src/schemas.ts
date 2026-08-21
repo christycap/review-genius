@@ -1,7 +1,11 @@
 import { z } from "zod";
+import { PRODUCT_TRANSLATION_PROMPT_VERSION } from "./prompts/english-translation.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "./prompts/product-optimization.js";
+import { REVIEW_SENTIMENT_PROMPT_VERSION } from "./prompts/review-sentiment.js";
 
 export const SUGGESTION_PROMPT_VERSION = PRODUCT_OPTIMIZATION_PROMPT_VERSION;
+export const TRANSLATION_PROMPT_VERSION = PRODUCT_TRANSLATION_PROMPT_VERSION;
+export const SENTIMENT_PROMPT_VERSION = REVIEW_SENTIMENT_PROMPT_VERSION;
 
 const asinSchema = z
     .string()
@@ -52,17 +56,72 @@ export const inputSchema = z
         });
     });
 
-export const reviewSchema = z.object({
-    rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
-    title: z.string().nullable(),
-    comment: z.string()
-});
+export const reviewSelectionReasonSchema = z.enum(["embedded-top", "recent", "critical"]);
+
+export const reviewSchema = z
+    .object({
+        id: z.string().min(1).nullable().default(null),
+        rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+        title: z.string().nullable(),
+        comment: z.string(),
+        date: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .nullable()
+            .default(null),
+        dateText: z.string().default(""),
+        verifiedPurchase: z.boolean().default(false),
+        reviewedAsin: asinSchema.nullable().default(null),
+        variant: z.string().nullable().default(null),
+        sourceLanguage: z.string().min(1).nullable().default(null),
+        helpfulCount: z.number().int().nonnegative().default(0),
+        selectionReason: reviewSelectionReasonSchema.default("embedded-top")
+    })
+    .strict();
+
+export const reviewCollectionSchema = z.preprocess(
+    value => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+
+        // Backward compatibility for reports produced while an age cutoff was enforced.
+        const { reviewCutoffDate: _legacyReviewCutoffDate, ...collection } = value as Record<
+            string,
+            unknown
+        >;
+        return collection;
+    },
+    z
+        .object({
+            strategy: z.enum(["embedded-top", "recent", "recent-balanced"]),
+            limit: z.number().int().min(1).max(100),
+            collectedAt: z.string().datetime().nullable(),
+            pagesVisited: z.number().int().nonnegative(),
+            complete: z.boolean(),
+            scraperVersion: z.number().int().positive(),
+            corpusHash: z
+                .string()
+                .regex(/^[a-f0-9]{64}$/)
+                .nullable()
+        })
+        .strict()
+);
+
+const legacyReviewCollection = {
+    strategy: "embedded-top" as const,
+    limit: 30,
+    collectedAt: null,
+    pagesVisited: 0,
+    complete: false,
+    scraperVersion: 1,
+    corpusHash: null
+};
 
 export const productReviewsSchema = z
     .object({
         overallRating: z.number().min(0).max(5),
         totalCount: z.number().int().nonnegative(),
-        items: z.array(reviewSchema)
+        items: z.array(reviewSchema).max(100),
+        collection: reviewCollectionSchema.default(legacyReviewCollection)
     })
     .strict();
 
@@ -101,18 +160,97 @@ export const suggestionsSchema = z
 
 export const suggestionProviderSchema = z.enum(["deepseek", "gemini"]);
 
+export const reviewSentimentSchema = z.enum(["positive", "negative"]);
+
+export const reviewSentimentAnalysisSchema = z
+    .object({
+        overallSummary: z.string().trim().min(1),
+        positiveSummary: z.string().trim().min(1),
+        negativeSummary: z.string().trim().min(1),
+        classifications: z.array(
+            z
+                .object({
+                    index: z.number().int().nonnegative(),
+                    reviewKey: z.string().min(1),
+                    sentiment: reviewSentimentSchema
+                })
+                .strict()
+        )
+    })
+    .strict();
+
+export const listingEnglishTranslationsSchema = z
+    .object({
+        title: z.string(),
+        productFeatures: z.array(z.string()),
+        description: z.string()
+    })
+    .strict();
+
+export const reviewEnglishTranslationSchema = z
+    .object({
+        index: z.number().int().nonnegative(),
+        reviewKey: z.string().min(1),
+        title: z.string(),
+        comment: z.string(),
+        dateText: z.string(),
+        variant: z.string()
+    })
+    .strict();
+
+export const productEnglishTranslationsSchema = z
+    .object({
+        original: listingEnglishTranslationsSchema,
+        suggestions: listingEnglishTranslationsSchema,
+        reviews: z.array(reviewEnglishTranslationSchema)
+    })
+    .strict();
+
+export const refinedSuggestionsSchema = z
+    .object({
+        suggestions: suggestionsSchema,
+        englishTranslations: listingEnglishTranslationsSchema
+    })
+    .strict();
+
 export const storedProductSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema.optional(),
     suggestionPromptVersion: z.number().int().positive().optional(),
     suggestionProvider: suggestionProviderSchema.optional(),
-    suggestionModel: z.string().min(1).optional()
+    suggestionModel: z.string().min(1).optional(),
+    reviewSentiment: reviewSentimentAnalysisSchema.optional(),
+    sentimentPromptVersion: z.number().int().positive().optional(),
+    sentimentProvider: suggestionProviderSchema.optional(),
+    sentimentModel: z.string().min(1).optional(),
+    sentimentSourceHash: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
+    englishTranslations: productEnglishTranslationsSchema.optional(),
+    translationPromptVersion: z.number().int().positive().optional(),
+    translationProvider: suggestionProviderSchema.optional(),
+    translationModel: z.string().min(1).optional(),
+    translationSourceHash: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional()
 });
 
 export const productSchema = scrapedProductSchema.extend({
     suggestions: suggestionsSchema,
     suggestionPromptVersion: z.literal(SUGGESTION_PROMPT_VERSION),
     suggestionProvider: suggestionProviderSchema,
-    suggestionModel: z.string().min(1)
+    suggestionModel: z.string().min(1),
+    reviewSentiment: reviewSentimentAnalysisSchema,
+    sentimentPromptVersion: z.literal(SENTIMENT_PROMPT_VERSION),
+    sentimentProvider: suggestionProviderSchema,
+    sentimentModel: z.string().min(1),
+    sentimentSourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+    englishTranslations: productEnglishTranslationsSchema,
+    translationPromptVersion: z.literal(TRANSLATION_PROMPT_VERSION),
+    translationProvider: suggestionProviderSchema,
+    translationModel: z.string().min(1),
+    translationSourceHash: z.string().regex(/^[a-f0-9]{64}$/)
 });
 
 const storedMarketOutputSchema = z
@@ -188,7 +326,16 @@ export type Input = z.infer<typeof inputSchema>;
 export type Market = z.infer<typeof marketSchema>;
 export type ScrapedProduct = z.infer<typeof scrapedProductSchema>;
 export type ProductReviews = z.infer<typeof productReviewsSchema>;
+export type Review = z.infer<typeof reviewSchema>;
 export type ProductSuggestions = z.infer<typeof suggestionsSchema>;
+export type ReviewSentiment = z.infer<typeof reviewSentimentSchema>;
+export type ReviewSentimentAnalysis = z.infer<typeof reviewSentimentAnalysisSchema>;
+export type ProductOptimizationProduct = ScrapedProduct & {
+    reviewSentiment: ReviewSentimentAnalysis;
+};
+export type ListingEnglishTranslations = z.infer<typeof listingEnglishTranslationsSchema>;
+export type ProductEnglishTranslations = z.infer<typeof productEnglishTranslationsSchema>;
+export type RefinedSuggestions = z.infer<typeof refinedSuggestionsSchema>;
 export type SuggestionProvider = z.infer<typeof suggestionProviderSchema>;
 export type StoredProduct = z.infer<typeof storedProductSchema>;
 export type StoredOutput = z.infer<typeof storedOutputSchema>;
