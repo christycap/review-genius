@@ -5,7 +5,7 @@
 <h1 align="center">Review Genius</h1>
 
 <p align="center">
-  Turn Amazon listings and customer reviews into copy recommendations designed around official Amazon guidance and conversion best practices, delivered in a self-contained, navigable report.
+  Review-informed Amazon listing recommendations, delivered in client-ready reports.
 </p>
 
 <p align="center">
@@ -14,7 +14,9 @@
 
 ## What it does
 
-Review Genius processes a list of Amazon ASINs grouped by market and produces an interactive report for reviewing the original listing alongside optimized suggestions. Its shared AI prompt applies official Amazon listing guidance and ecommerce usability research to improve each title, feature set, and description for marketplace alignment, clarity, discoverability, and conversion.
+Review Genius generates Amazon listing reports that Numberly delivers to its customers—for example, a multi-market report prepared for Smartbox. From a market-by-market list of ASINs, it collects each product's current listing and customer reviews, then produces an interactive HTML report and client-ready Excel workbooks comparing the original copy with recommendations—and a clear rationale—for the title, feature list, and description.
+
+Reviews are a direct input to the recommendations, not merely supplementary content displayed in the report. Review Genius synthesizes what shoppers value, the concerns that may prevent a purchase, and the feedback customers found most helpful. It combines that evidence with official Amazon listing guidance and ecommerce usability research to improve searchability, clarity, confidence, and conversion. The proposed copy is also shaped to preserve the most important information in compact placements such as search results, mobile views, recommendations, and cart surfaces—not only on the full product page.
 
 For each product, the tool:
 
@@ -23,13 +25,13 @@ For each product, the tool:
 3. Captures each review's Amazon helpful-vote count, then asks the configured AI provider—DeepSeek or Gemini—to classify every review as positive or negative and create positive, negative, and overall English sentiment summaries. Helpful votes weight recurring themes, while the full-listing rating and count anchor the overall synthesis.
 4. Sends the original listing and those three summaries—not every review body—to the optimization model, limiting noise while preserving the evidence most useful for copy decisions.
 5. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
-6. Makes a separate, faithful translation pass over the original listing, proposed listing, and extracted reviews so an international client can inspect every market in English without weakening the optimization prompt.
+6. Makes a separate, faithful translation pass over the original listing, proposed listing, and extracted reviews so the Numberly customer receiving the report can inspect every market in English without weakening the optimization prompt.
 7. Builds a self-contained React report with market/product navigation, sentiment views, on-demand English translations, comparisons, character counts, copy controls, and light/dark themes, plus a client-ready Excel workbook for every market.
-8. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback; the new suggestion's English translation is refreshed at the same time.
+8. Lets the Numberly customer regenerate a product's complete suggestion directly in the delivered report with additional keyword, product, or editorial feedback; the new suggestion's English translation is refreshed at the same time.
 
 ```mermaid
 flowchart LR
-    A[Market + ASIN input] --> B[Serialized Amazon browser collection]
+    A[Market + ASIN input] --> B[Human-assisted Amazon browser collection]
     B --> C[Up to 100 reviews + helpful votes]
     C --> D[AI sentiment classification + summaries]
     D --> E[AI listing optimization from summaries]
@@ -40,6 +42,9 @@ flowchart LR
     H --> I[Optional browser feedback refinement + translation]
     I --> H
 ```
+
+> [!IMPORTANT]
+> Review Genius is an operator-assisted desktop tool, not an unattended batch service. A human must remain available during the build to sign in to Amazon and solve any CAPTCHA or access challenge presented in the visible browser. Consequently, `npm run build` must not be run in CI, a headless job, or another unattended environment.
 
 All build-time external requests are deliberately serialized to avoid parallel request bursts. Because each Amazon collection is followed by AI enrichment before the next product begins, the pipeline is naturally paced without an additional artificial delay. Product pages are cached, while review corpora are never reused beyond 24 hours. Browser downloads, the dedicated Amazon session, raw review pages, and report downloads all stay under `.cache/`, allowing interrupted runs to resume without polluting the repository.
 
@@ -59,7 +64,7 @@ All build-time external requests are deliberately serialized to avoid parallel r
 -   [Node.js 22 or newer](https://nodejs.org/) and npm
 -   A valid [DeepSeek API key](https://platform.deepseek.com/api_keys) or [Gemini API key](https://aistudio.google.com/app/apikey)
 -   Network access to the Amazon marketplaces being processed
--   An interactive desktop session so the visible Amazon browser can be used for sign-in or a CAPTCHA when Amazon requests one
+-   An interactive desktop session with a human operator available for Amazon sign-in and CAPTCHA or access challenges
 
 Amazon may block requests originating from datacenter, VPN, or cloud-development IP addresses. Running from a normal domestic connection is recommended if Amazon returns a challenge page. Always use the tool responsibly and respect Amazon's applicable terms and policies.
 
@@ -97,7 +102,7 @@ GEMINI_MODEL=gemini-3.7-flash
 
 The build stops before processing if both keys are set, neither key is set, or Gemini is selected without `GEMINI_MODEL`.
 
-The `.env` file is ignored by Git. Never commit it. The selected provider key is deliberately embedded in the generated HTML so the local browser can regenerate suggestions without a server. Share the report only with collaborators who are allowed to use that key.
+The `.env` file is ignored by Git. Never commit it. The selected provider key is deliberately embedded in the generated HTML so the local browser can regenerate suggestions without a server. Share the report only with the intended Numberly customer and other authorized recipients who are permitted to use that key.
 
 ## Authenticate with Amazon
 
@@ -110,6 +115,8 @@ npm run amazon:login
 One Amazon account page opens for every configured marketplace. Sign in where required, complete any Amazon challenge, then return to the terminal and press Enter. The session is reused by subsequent builds.
 
 You can also start `npm run build` directly. If a review page redirects to sign-in or presents a CAPTCHA, the build keeps its visible browser open, prints the affected market and ASIN, and pauses until you resolve it and press Enter in the terminal. No CAPTCHA is bypassed programmatically.
+
+Because Amazon can request operator action at any point, do not run the build in CI or as an unattended scheduled job.
 
 ## Input format
 
@@ -164,13 +171,13 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website, raw JSON, and per-market Excel workbooks. Review pages are traversed in recency order until Amazon has no next page or the 100-review ceiling is reached; there is no age cutoff. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website, raw JSON, and per-market Excel workbooks. Review pages are traversed in recency order until Amazon has no next page or the 100-review ceiling is reached; there is no age cutoff. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report and PNG for the Excel workbooks; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive desktop terminal with a human operator present; it is intentionally not a CI-compatible workflow.
 
 The build produces the following deliverables:
 
 -   [`output/Smartbox_2026.html`](output/Smartbox_2026.html): a single-file website containing its CSS, JavaScript, favicon, logo, product images, report data, and AI configuration.
 -   [`output/Smartbox_2026.json`](output/Smartbox_2026.json): the readable deterministic dataset, also used to resume future builds.
--   `output/Smartbox_2026_fr.xlsx`, `output/Smartbox_2026_es.xlsx`, and equivalent files for every enabled market: client-ready workbooks with an overview, one detailed worksheet per ASIN, and the extracted review corpus. Product worksheets compare original and suggested copy, include English translations and character deltas, explain the rationale for every recommendation, and summarize positive, negative, and overall review sentiment. Client-facing HTML and Excel files intentionally omit provider/model metadata and internal model working notes.
+-   `output/Smartbox_2026_fr.xlsx`, `output/Smartbox_2026_es.xlsx`, and equivalent files for every enabled market: client-ready workbooks with embedded product images, an overview, one detailed worksheet per ASIN, and the extracted review corpus. Product worksheets compare original and suggested copy, include English translations and character deltas, explain the rationale for every recommendation, and summarize positive, negative, and overall review sentiment. Client-facing HTML and Excel files intentionally omit provider/model metadata and internal model working notes.
 
 Open the HTML file directly in a browser. No web server or internet connection is required to browse the report or reveal translations; all initial translations are embedded at build time. An internet connection is required only when regenerating suggestions.
 
@@ -182,7 +189,7 @@ open output/Smartbox_2026.html
 
 ### Refine a suggestion in the report
 
-For any product, select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, persisted sentiment summaries, current suggestions, and additional feedback to the provider and model selected during the build. Individual review bodies are not included in this optimization request. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
+For any product, the customer receiving the report can select **Regenerate suggestions with additional feedback**, enter guidance such as `“idée cadeau voyage” is an important search phrase and must remain in the title`, and submit it. The browser sends the original listing, persisted sentiment summaries, current suggestions, and additional feedback to the provider and model selected during the build. Individual review bodies are not included in this optimization request. The same optimization prompt, structured response format, and deterministic validation are reused. Once the new proposal is validated, a second request translates its title, feature bullets, and description into English.
 
 While the request runs, the report shows the active generation or translation stage, elapsed time, and retry attempt. Internal model working notes are neither requested for display nor exposed; only the validated field-level recommendation rationales accompany the final proposal.
 

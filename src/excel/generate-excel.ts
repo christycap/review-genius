@@ -1,12 +1,16 @@
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import ExcelJS, { type Cell, type CellValue, type Row, type Worksheet } from "exceljs";
+import sharp from "sharp";
 import { getAmazonProductUrl } from "../amazon-marketplaces.js";
+import { runExternalRequest } from "../external-request.js";
 import { createReviewKey } from "../review-key.js";
 import { stripAmazonRatingFromReviewTitle } from "../review-title.js";
 import type { Market, StoredOutput, StoredProduct } from "../schemas.js";
 
 const EXCEL_CACHE_DIRECTORY = path.resolve(".cache/excel");
+const EXCEL_PRODUCT_IMAGES_DIRECTORY = path.join(EXCEL_CACHE_DIRECTORY, "product-images");
+const REPORT_PRODUCT_IMAGES_DIRECTORY = path.resolve(".cache/report/product-images");
 const EXCEL_CELL_CHARACTER_LIMIT = 32_767;
 const WORKBOOK_FONT = "Arial";
 const REPORT_NAME = "Review Genius";
@@ -36,6 +40,94 @@ const COLORS = {
     border: "FFD3DEE2",
     white: "FFFFFFFF"
 } as const;
+
+async function readCachedImage(filePath: string): Promise<Buffer | undefined> {
+    try {
+        const image = await readFile(filePath);
+        return image.byteLength >= 100 ? image : undefined;
+    } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+            return undefined;
+        }
+        throw error;
+    }
+}
+
+function decodeImageDataUrl(imageUrl: string): Buffer | undefined {
+    const match = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/is.exec(imageUrl);
+    if (!match) return undefined;
+
+    const image = Buffer.from(match[1], "base64");
+    return image.byteLength >= 100 ? image : undefined;
+}
+
+async function loadProductImage(market: Market, asin: string, imageUrl: string): Promise<Buffer> {
+    const reportImagePath = path.join(REPORT_PRODUCT_IMAGES_DIRECTORY, market, `${asin}.jpg`);
+    const reportImage = await readCachedImage(reportImagePath);
+    if (reportImage) return reportImage;
+
+    const embeddedImage = decodeImageDataUrl(imageUrl);
+    if (embeddedImage) return embeddedImage;
+
+    return runExternalRequest(async () => {
+        const response = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.headers.get("content-type")?.startsWith("image/")) {
+            throw new Error("the response was not an image");
+        }
+
+        const image = Buffer.from(await response.arrayBuffer());
+        if (image.byteLength < 100) throw new Error("the response was empty");
+        return image;
+    });
+}
+
+async function prepareProductImage(market: Market, product: StoredProduct): Promise<string | undefined> {
+    const imagePath = path.join(EXCEL_PRODUCT_IMAGES_DIRECTORY, market, `${product.asin}.png`);
+    if (await readCachedImage(imagePath)) return imagePath;
+
+    try {
+        const sourceImage = await loadProductImage(market, product.asin, product.productImageUrl);
+        const image = await sharp(sourceImage)
+            .rotate()
+            .resize({
+                width: 480,
+                height: 480,
+                fit: "contain",
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
+            })
+            .png({ compressionLevel: 9 })
+            .toBuffer();
+
+        await mkdir(path.dirname(imagePath), { recursive: true });
+        await writeFile(imagePath, image);
+        return imagePath;
+    } catch (error) {
+        console.warn(
+            `    Product image omitted from the ${market} workbook for ${product.asin}: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+        return undefined;
+    }
+}
+
+async function registerProductImages(
+    workbook: ExcelJS.Workbook,
+    market: Market,
+    products: StoredProduct[]
+): Promise<Map<string, number>> {
+    const images = new Map<string, number>();
+
+    for (const product of products) {
+        const imagePath = await prepareProductImage(market, product);
+        if (imagePath) {
+            images.set(product.asin, workbook.addImage({ filename: imagePath, extension: "png" }));
+        }
+    }
+
+    return images;
+}
 
 function countCharacters(value: string): number {
     return Array.from(value).length;
@@ -159,13 +251,15 @@ function addOverviewSheet(
     output: StoredOutput,
     market: Market,
     products: StoredProduct[],
-    productSheetNames: Map<string, string>
+    productSheetNames: Map<string, string>,
+    productImages: Map<string, number>
 ): void {
     const worksheet = workbook.addWorksheet("Overview", {
         properties: { tabColor: { argb: COLORS.teal } },
         views: [{ state: "frozen", ySplit: 4, topLeftCell: "A5", showGridLines: false }]
     });
     worksheet.columns = [
+        { width: 13 },
         { width: 15 },
         { width: 18 },
         { width: 58 },
@@ -183,10 +277,10 @@ function addOverviewSheet(
         `${output.title} · ${MARKET_NAMES[market]} (${market}) · ${products.length} product${
             products.length === 1 ? "" : "s"
         }`,
-        10
+        11
     );
 
-    worksheet.mergeCells("A3:J3");
+    worksheet.mergeCells("A3:K3");
     worksheet.getCell("A3").value =
         "Use the product links to inspect Amazon listings and the analysis links to open the detailed recommendation for each ASIN.";
     worksheet.getCell("A3").font = { italic: true, color: { argb: COLORS.grey }, size: 10 };
@@ -195,6 +289,7 @@ function addOverviewSheet(
 
     const header = worksheet.getRow(4);
     header.values = [
+        "Product",
         "ASIN",
         "Amazon listing",
         "Original title (market language)",
@@ -206,13 +301,14 @@ function addOverviewSheet(
         "Negative",
         "Product analysis"
     ];
-    styleTableHeader(header, 10);
+    styleTableHeader(header, 11);
 
     products.forEach((product, index) => {
         const classifications = product.reviewSentiment?.classifications ?? [];
         const positiveCount = classifications.filter(item => item.sentiment === "positive").length;
         const negativeCount = classifications.filter(item => item.sentiment === "negative").length;
         const row = worksheet.addRow([
+            "",
             product.asin,
             {
                 text: "Open on Amazon",
@@ -228,34 +324,47 @@ function addOverviewSheet(
             negativeCount,
             internalSheetLink(productSheetNames.get(product.asin) ?? product.asin, "Open analysis")
         ]);
-        row.height = 64;
-        styleDataRow(row, 10, index % 2 === 0 ? COLORS.white : COLORS.greyPale);
-        row.getCell(2).font = { color: { argb: COLORS.tealDark }, underline: true, size: 10 };
-        row.getCell(10).font = {
+        row.height = 58;
+        styleDataRow(row, 11, index % 2 === 0 ? COLORS.white : COLORS.greyPale);
+        row.getCell(3).font = { color: { argb: COLORS.tealDark }, underline: true, size: 10 };
+        row.getCell(11).font = {
             bold: true,
             color: { argb: COLORS.tealDark },
             underline: true,
             size: 10
         };
-        row.getCell(5).numFmt = "0.0";
-        row.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
-        [6, 7, 8, 9].forEach(column => {
+        row.getCell(6).numFmt = "0.0";
+        row.getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+        [7, 8, 9, 10].forEach(column => {
             row.getCell(column).numFmt = "#,##0";
             row.getCell(column).alignment = { horizontal: "center", vertical: "middle" };
         });
-        row.getCell(8).fill = {
+        row.getCell(9).fill = {
             type: "pattern",
             pattern: "solid",
             fgColor: { argb: COLORS.greenPale }
         };
-        row.getCell(9).fill = {
+        row.getCell(10).fill = {
             type: "pattern",
             pattern: "solid",
             fgColor: { argb: COLORS.redPale }
         };
+
+        const imageId = productImages.get(product.asin);
+        if (imageId !== undefined) {
+            worksheet.addImage(imageId, {
+                tl: { col: 0.18, row: row.number - 0.92 },
+                ext: { width: 52, height: 52 },
+                editAs: "oneCell",
+                hyperlinks: {
+                    hyperlink: getAmazonProductUrl(market, product.asin),
+                    tooltip: `Open ${product.asin} on Amazon`
+                }
+            });
+        }
     });
 
-    worksheet.autoFilter = { from: "A4", to: `J${Math.max(4, worksheet.rowCount)}` };
+    worksheet.autoFilter = { from: "A4", to: `K${Math.max(4, worksheet.rowCount)}` };
     worksheet.pageSetup = {
         orientation: "landscape",
         fitToPage: true,
@@ -326,11 +435,12 @@ function addProductSheet(
     output: StoredOutput,
     market: Market,
     product: StoredProduct,
-    sheetName: string
+    sheetName: string,
+    productImageId: number | undefined
 ): void {
     const worksheet = workbook.addWorksheet(sheetName, {
         properties: { tabColor: { argb: COLORS.teal } },
-        views: [{ state: "frozen", ySplit: 5, topLeftCell: "A6", showGridLines: false }]
+        views: [{ state: "frozen", ySplit: 8, topLeftCell: "A9", showGridLines: false }]
     });
     worksheet.columns = [
         { width: 20 },
@@ -350,55 +460,90 @@ function addProductSheet(
         9
     );
 
-    worksheet.mergeCells("A3:I3");
-    worksheet.getCell("A3").value = safeCellText(product.title);
-    worksheet.getCell("A3").font = { bold: true, color: { argb: COLORS.navy }, size: 12 };
-    worksheet.getCell("A3").alignment = { vertical: "middle", wrapText: true };
+    worksheet.mergeCells("A3:A7");
     worksheet.getCell("A3").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: COLORS.white }
+    };
+    styleBorder(worksheet.getCell("A3"));
+    if (productImageId !== undefined) {
+        worksheet.addImage(productImageId, {
+            tl: { col: 0.12, row: 2.18 },
+            ext: { width: 118, height: 118 },
+            editAs: "oneCell",
+            hyperlinks: {
+                hyperlink: getAmazonProductUrl(market, product.asin),
+                tooltip: `Open ${product.asin} on Amazon`
+            }
+        });
+    }
+
+    worksheet.mergeCells("B3:I4");
+    worksheet.getCell("B3").value = safeCellText(product.title);
+    worksheet.getCell("B3").font = { bold: true, color: { argb: COLORS.navy }, size: 12 };
+    worksheet.getCell("B3").alignment = { vertical: "middle", wrapText: true };
+    worksheet.getCell("B3").fill = {
         type: "pattern",
         pattern: "solid",
         fgColor: { argb: COLORS.tealPale }
     };
-    worksheet.getRow(3).height = 42;
+    styleBorder(worksheet.getCell("B3"));
+    worksheet.getRow(3).height = 34;
+    worksheet.getRow(4).height = 34;
 
-    worksheet.getCell("A4").value = internalSheetLink("Overview", "← Market overview");
-    styleMetadataValue(worksheet.getCell("A4"));
-    worksheet.getCell("A4").font = {
+    worksheet.mergeCells("B5:C5");
+    worksheet.getCell("B5").value = internalSheetLink("Overview", "← Market overview");
+    styleMetadataValue(worksheet.getCell("B5"));
+    worksheet.getCell("B5").font = {
         bold: true,
         color: { argb: COLORS.tealDark },
         underline: true,
         size: 10
     };
-    worksheet.mergeCells("B4:C4");
-    worksheet.getCell("B4").value = {
+    worksheet.mergeCells("D5:E5");
+    worksheet.getCell("D5").value = {
         text: "Open the Amazon listing",
         hyperlink: getAmazonProductUrl(market, product.asin),
         tooltip: `Open ${product.asin} on Amazon`
     };
-    styleMetadataValue(worksheet.getCell("B4"));
-    worksheet.getCell("B4").font = {
+    styleMetadataValue(worksheet.getCell("D5"));
+    worksheet.getCell("D5").font = {
         color: { argb: COLORS.tealDark },
         underline: true,
         size: 10
     };
-    worksheet.getCell("D4").value = "Amazon rating";
-    styleMetadataLabel(worksheet.getCell("D4"));
-    worksheet.getCell("E4").value = product.reviews.overallRating;
-    worksheet.getCell("E4").numFmt = "0.0";
-    styleMetadataValue(worksheet.getCell("E4"));
-    worksheet.getCell("F4").value = "Total reviews";
-    styleMetadataLabel(worksheet.getCell("F4"));
-    worksheet.getCell("G4").value = product.reviews.totalCount;
-    worksheet.getCell("G4").numFmt = "#,##0";
-    styleMetadataValue(worksheet.getCell("G4"));
-    worksheet.getCell("H4").value = "Extracted";
-    styleMetadataLabel(worksheet.getCell("H4"));
-    worksheet.getCell("I4").value = product.reviews.items.length;
-    worksheet.getCell("I4").numFmt = "#,##0";
-    styleMetadataValue(worksheet.getCell("I4"));
-    worksheet.getRow(4).height = 28;
+    worksheet.getCell("F5").value = "Amazon rating";
+    styleMetadataLabel(worksheet.getCell("F5"));
+    worksheet.getCell("G5").value = product.reviews.overallRating;
+    worksheet.getCell("G5").numFmt = "0.0";
+    styleMetadataValue(worksheet.getCell("G5"));
+    worksheet.getCell("H5").value = "Total reviews";
+    styleMetadataLabel(worksheet.getCell("H5"));
+    worksheet.getCell("I5").value = product.reviews.totalCount;
+    worksheet.getCell("I5").numFmt = "#,##0";
+    styleMetadataValue(worksheet.getCell("I5"));
 
-    const tableHeader = worksheet.getRow(5);
+    worksheet.getCell("B6").value = "ASIN";
+    styleMetadataLabel(worksheet.getCell("B6"));
+    worksheet.mergeCells("C6:D6");
+    worksheet.getCell("C6").value = product.asin;
+    styleMetadataValue(worksheet.getCell("C6"));
+    worksheet.getCell("E6").value = "Market";
+    styleMetadataLabel(worksheet.getCell("E6"));
+    worksheet.getCell("F6").value = `${MARKET_NAMES[market]} (${market})`;
+    styleMetadataValue(worksheet.getCell("F6"));
+    worksheet.getCell("G6").value = "Extracted reviews";
+    styleMetadataLabel(worksheet.getCell("G6"));
+    worksheet.mergeCells("H6:I6");
+    worksheet.getCell("H6").value = product.reviews.items.length;
+    worksheet.getCell("H6").numFmt = "#,##0";
+    styleMetadataValue(worksheet.getCell("H6"));
+    worksheet.getRow(5).height = 28;
+    worksheet.getRow(6).height = 28;
+    worksheet.getRow(7).height = 12;
+
+    const tableHeader = worksheet.getRow(8);
     tableHeader.values = [
         "Element",
         "Current copy (market language)",
@@ -480,7 +625,7 @@ function addProductSheet(
         }
     });
 
-    const insightHeaderRow = 10;
+    const insightHeaderRow = 13;
     worksheet.mergeCells(insightHeaderRow, 1, insightHeaderRow, 9);
     const insightHeader = worksheet.getCell(insightHeaderRow, 1);
     insightHeader.value = "Review insights";
@@ -534,7 +679,7 @@ function addProductSheet(
         fitToWidth: 1,
         fitToHeight: 0,
         paperSize: 9,
-        printArea: "A1:I13",
+        printArea: "A1:I16",
         margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
     };
     worksheet.headerFooter.oddFooter = `&L${REPORT_NAME}&C${product.asin}&RPage &P of &N`;
@@ -738,11 +883,11 @@ function createProductSheetNames(products: StoredProduct[]): Map<string, string>
     return names;
 }
 
-function createMarketWorkbook(
+async function createMarketWorkbook(
     output: StoredOutput,
     market: Market,
     products: StoredProduct[]
-): ExcelJS.Workbook {
+): Promise<ExcelJS.Workbook> {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = `Numberly · ${REPORT_NAME}`;
     workbook.lastModifiedBy = REPORT_NAME;
@@ -752,19 +897,21 @@ function createMarketWorkbook(
     workbook.title = `${output.title} · ${MARKET_NAMES[market]} recommendations`;
     workbook.subject = "Amazon listing recommendations and review evidence";
     workbook.description =
-        "Original Amazon listing copy, recommendations, English translations, recommendation rationales, sentiment summaries, and extracted reviews.";
+        "Product images, original Amazon listing copy, recommendations, English translations, recommendation rationales, sentiment summaries, and extracted reviews.";
     workbook.keywords = "Amazon, ecommerce, recommendations, reviews, Numberly";
     workbook.calcProperties.fullCalcOnLoad = true;
 
     const productSheetNames = createProductSheetNames(products);
-    addOverviewSheet(workbook, output, market, products, productSheetNames);
+    const productImages = await registerProductImages(workbook, market, products);
+    addOverviewSheet(workbook, output, market, products, productSheetNames, productImages);
     products.forEach(product => {
         addProductSheet(
             workbook,
             output,
             market,
             product,
-            productSheetNames.get(product.asin) ?? product.asin
+            productSheetNames.get(product.asin) ?? product.asin,
+            productImages.get(product.asin)
         );
     });
     addReviewsSheet(workbook, output, market, products);
@@ -815,7 +962,7 @@ export async function generateMarketExcelWorkbooks(
             EXCEL_CACHE_DIRECTORY,
             `${datasetBasename}_${market}.${process.pid}.${Date.now()}.xlsx`
         );
-        const workbook = createMarketWorkbook(output, market, products);
+        const workbook = await createMarketWorkbook(output, market, products);
 
         try {
             await workbook.xlsx.writeFile(temporaryPath);
