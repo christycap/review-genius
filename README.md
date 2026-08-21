@@ -24,7 +24,7 @@ For each product, the tool:
 4. Sends the original listing and those three summaries—not every review body—to the optimization model, limiting noise while preserving the evidence most useful for copy decisions.
 5. Generates a market-language title, feature set, and description, plus an English editorial rationale for each suggestion.
 6. Makes a separate, faithful translation pass over the original listing, proposed listing, and extracted reviews so an international client can inspect every market in English without weakening the optimization prompt.
-7. Builds a self-contained React report with market/product navigation, sentiment views, on-demand English translations, comparisons, character counts, copy controls, and light/dark themes.
+7. Builds a self-contained React report with market/product navigation, sentiment views, on-demand English translations, comparisons, character counts, copy controls, and light/dark themes, plus a client-ready Excel workbook for every market.
 8. Lets collaborators regenerate a product's complete suggestion directly in the report with additional keyword, product, or editorial feedback; the new suggestion's English translation is refreshed at the same time.
 
 ```mermaid
@@ -36,6 +36,7 @@ flowchart LR
     E --> F[AI English translation]
     F --> G[Validated JSON output]
     G --> H[Self-contained HTML report]
+    G --> J[Per-market Excel workbooks]
     H --> I[Optional browser feedback refinement + translation]
     I --> H
 ```
@@ -163,12 +164,13 @@ Input rules:
 npm run build
 ```
 
-The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website. Review pages are traversed in recency order until Amazon has no next page or the 100-review ceiling is reached; there is no age cutoff. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
+The command validates the input, resumes completed work, collects missing or stale Amazon data sequentially, requests missing or outdated sentiment analysis, suggestions, and English translations, and generates the website, raw JSON, and per-market Excel workbooks. Review pages are traversed in recency order until Amazon has no next page or the 100-review ceiling is reached; there is no age cutoff. Sentiment, optimization, and translation each have independent version/source metadata, so changing one contract refreshes only the affected artifacts. Product images are resized and encoded as WebP for the report; intermediate assets and original downloads remain under `.cache/`. Run the build from an interactive terminal so it can pause for operator action if Amazon requests authentication.
 
-The build produces exactly two deliverables:
+The build produces the following deliverables:
 
 -   [`output/Smartbox_2026.html`](output/Smartbox_2026.html): a single-file website containing its CSS, JavaScript, favicon, logo, product images, report data, and AI configuration.
 -   [`output/Smartbox_2026.json`](output/Smartbox_2026.json): the readable deterministic dataset, also used to resume future builds.
+-   `output/Smartbox_2026_fr.xlsx`, `output/Smartbox_2026_es.xlsx`, and equivalent files for every enabled market: client-ready workbooks with an overview, one detailed worksheet per ASIN, and the extracted review corpus. Product worksheets compare original and suggested copy, include English translations and character deltas, explain the reasoning for every suggestion, and summarize positive, negative, and overall review sentiment.
 
 Open the HTML file directly in a browser. No web server or internet connection is required to browse the report or reveal translations; all initial translations are embedded at build time. An internet connection is required only when regenerating suggestions.
 

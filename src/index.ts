@@ -7,6 +7,7 @@ import { isReviewCollectionCurrent } from "./amazon-reviews.js";
 import { fetchProduct } from "./amazon.js";
 import { withElapsedStatus } from "./console-progress.js";
 import { DEEPSEEK_MODEL } from "./deepseek.js";
+import { generateMarketExcelWorkbooks } from "./excel/generate-excel.js";
 import { generateReport } from "./report/generate-report.js";
 import { createReviewSentimentSourceHash } from "./review-sentiment-source.js";
 import {
@@ -438,12 +439,21 @@ async function main(): Promise<void> {
     const { errors, output } = result;
     console.log("\nGenerating self-contained HTML report...");
     await generateReport(output, REPORT_OUTPUT_PATH, suggestionService.reportConfig);
+    console.log("Generating per-market Excel workbooks...");
+    const excelOutputPaths = await generateMarketExcelWorkbooks(
+        output,
+        OUTPUT_DIRECTORY,
+        DATASET_BASENAME
+    );
     await Promise.all([
         rm(LEGACY_REPORT_DIRECTORY, { recursive: true, force: true }),
         rm(path.join(OUTPUT_DIRECTORY, ".DS_Store"), { force: true })
     ]);
     console.log(`Report generated at ${REPORT_OUTPUT_PATH}`);
     console.log(`Raw data saved at ${DATA_OUTPUT_PATH}`);
+    excelOutputPaths.forEach(excelOutputPath => {
+        console.log(`Excel export generated at ${excelOutputPath}`);
+    });
 
     if (errors.length > 0) {
         throw new Error(
