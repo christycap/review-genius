@@ -2,7 +2,7 @@ node_modules/
 dist/
 coverage/
 output/
-.cache/
+/.cache/
 
 .env
 !.env.example
