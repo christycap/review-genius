@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PRODUCT_TRANSLATION_PROMPT_VERSION } from "./prompts/english-translation.js";
 import { PRODUCT_OPTIMIZATION_PROMPT_VERSION } from "./prompts/product-optimization.js";
 import { REVIEW_SENTIMENT_PROMPT_VERSION } from "./prompts/review-sentiment.js";
+import { LEGACY_REVIEW_STORAGE_LIMIT } from "./review-constants.js";
 
 export const SUGGESTION_PROMPT_VERSION = PRODUCT_OPTIMIZATION_PROMPT_VERSION;
 export const TRANSLATION_PROMPT_VERSION = PRODUCT_TRANSLATION_PROMPT_VERSION;
@@ -93,7 +94,8 @@ export const reviewCollectionSchema = z.preprocess(
     z
         .object({
             strategy: z.enum(["embedded-top", "recent", "recent-balanced"]),
-            limit: z.number().int().min(1).max(100),
+            // Accept the former ceiling so existing output can be loaded and refreshed.
+            limit: z.number().int().min(1).max(LEGACY_REVIEW_STORAGE_LIMIT),
             collectedAt: z.string().datetime().nullable(),
             pagesVisited: z.number().int().nonnegative(),
             complete: z.boolean(),
@@ -120,7 +122,8 @@ export const productReviewsSchema = z
     .object({
         overallRating: z.number().min(0).max(5),
         totalCount: z.number().int().nonnegative(),
-        items: z.array(reviewSchema).max(100),
+        // Scraper v6 writes at most 70; the larger bound is read compatibility for v5 output.
+        items: z.array(reviewSchema).max(LEGACY_REVIEW_STORAGE_LIMIT),
         collection: reviewCollectionSchema.default(legacyReviewCollection)
     })
     .strict();

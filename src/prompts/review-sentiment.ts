@@ -1,8 +1,10 @@
+import { AMAZON_REVIEW_LIMIT } from "../review-constants.js";
+
 /**
  * Review sentiment is versioned independently from listing optimization and
  * translation so each AI artifact can be refreshed only when its own contract changes.
  */
-export const REVIEW_SENTIMENT_PROMPT_VERSION = 2 as const;
+export const REVIEW_SENTIMENT_PROMPT_VERSION = 3 as const;
 
 export const REVIEW_SENTIMENT_JSON_SCHEMA = {
     type: "object",
@@ -76,7 +78,7 @@ Rules:
 - Preserve the exact review order, index, and reviewKey. Do not return explanations per review or any additional properties.
 - Write all three summaries in clear, concise English. Summarize themes rather than reviewing individual comments one by one, and never quote or closely copy review wording.
 - Helpful-vote count is an evidence-weight signal: give themes from more-helpful reviews greater consideration, but do not let one popular outlier erase corroborating or conflicting themes. A helpful vote does not prove a reviewer's claims are factual.
-- The aggregate Amazon rating and total review count cover the full listing and must be the primary evidence for the overall tone. The extracted reviews are a recency-sorted, qualitatively balanced subset of up to 100 reviews and are not a representative rating distribution. Never infer full-population percentages or prevalence from the extracted positive/negative counts.
+- The aggregate Amazon rating and total review count cover the full listing and must be the primary evidence for the overall tone. The extracted reviews are a recency-sorted, qualitatively balanced subset of up to ${AMAZON_REVIEW_LIMIT} reviews and are not a representative rating distribution. Never infer full-population percentages or prevalence from the extracted positive/negative counts.
 - The overall summary must explicitly reconcile the aggregate rating/count with the extracted themes, including tensions when corpus criticism differs from the aggregate score.
 - The positive summary must identify the most decision-relevant praised themes present in positive reviews. If there are no positive extracted reviews, say so plainly without inventing themes.
 - The negative summary must identify the most decision-relevant objections, uncertainty, or friction present in negative reviews. If there are no negative extracted reviews, say so plainly without inventing concerns.
@@ -98,7 +100,7 @@ ${JSON.stringify({
         totalReviewCount: reviews.totalCount
     },
     extractedCorpus: {
-        maximumReviewCount: 100,
+        maximumReviewCount: AMAZON_REVIEW_LIMIT,
         extractedReviewCount: reviews.items.length,
         reviews: reviews.items.map((review, index) => ({
             index,

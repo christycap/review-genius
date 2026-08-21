@@ -6,16 +6,20 @@ import type { Page } from "puppeteer";
 import { createAmazonPage, waitForAmazonAccess } from "./amazon-browser.js";
 import { amazonMarketplaces } from "./amazon-marketplaces.js";
 import { runExternalRequest } from "./external-request.js";
+import { AMAZON_REVIEW_LIMIT } from "./review-constants.js";
 import { stripAmazonRatingFromReviewTitle } from "./review-title.js";
 import { productReviewsSchema, type Market, type ProductReviews, type Review } from "./schemas.js";
 
-export const AMAZON_REVIEW_LIMIT = 100;
-export const AMAZON_REVIEW_SCRAPER_VERSION = 4;
+export { AMAZON_REVIEW_LIMIT } from "./review-constants.js";
+export const AMAZON_REVIEW_SCRAPER_VERSION = 6;
 
 const REVIEW_CACHE_DIRECTORY = path.resolve(".cache/amazon/reviews");
 const REVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
-const RECENT_REVIEW_TARGET = 70;
+const RECENT_REVIEW_TARGET = Math.round(AMAZON_REVIEW_LIMIT * 0.7);
 const CRITICAL_REVIEW_TARGET = AMAZON_REVIEW_LIMIT - RECENT_REVIEW_TARGET;
+const REVIEW_ITEM_SELECTOR = '[data-hook="review"], [data-hook="reviewContainer"]';
+const SHOW_MORE_REVIEWS_SELECTOR =
+    '#cm_cr-pagination_bar [data-hook="show-more-button"], [data-hook="pagination-bar"] [data-hook="show-more-button"]';
 
 type CollectionReason = "recent" | "critical";
 
@@ -348,6 +352,57 @@ function buildNumberedNextPageUrl(currentUrl: string, currentPage: number): stri
     return url.href;
 }
 
+async function getRenderedReviewSignature(page: Page): Promise<string> {
+    return page.$$eval(REVIEW_ITEM_SELECTOR, reviews =>
+        reviews
+            .map((review, index) => {
+                const id =
+                    review.getAttribute("data-reviewid") ??
+                    review.getAttribute("data-review-id") ??
+                    review.id;
+                return id || `${index}:${review.textContent?.slice(0, 200) ?? ""}`;
+            })
+            .join("\0")
+    );
+}
+
+async function showMoreReviews(page: Page, market: Market, asin: string): Promise<boolean> {
+    const button = await page.$(SHOW_MORE_REVIEWS_SELECTOR);
+    if (!button) return false;
+
+    const previousSignature = await getRenderedReviewSignature(page);
+    await button.click();
+
+    try {
+        await page.waitForFunction(
+            (reviewSelector, signature) => {
+                const currentSignature = [...document.querySelectorAll(reviewSelector)]
+                    .map((review, index) => {
+                        const id =
+                            review.getAttribute("data-reviewid") ??
+                            review.getAttribute("data-review-id") ??
+                            review.id;
+                        return id || `${index}:${review.textContent?.slice(0, 200) ?? ""}`;
+                    })
+                    .join("\0");
+                return currentSignature !== signature;
+            },
+            { polling: 250, timeout: 30_000 },
+            REVIEW_ITEM_SELECTOR,
+            previousSignature
+        );
+    } catch {
+        await waitForAmazonAccess(page, market, asin);
+        if ((await getRenderedReviewSignature(page)) === previousSignature) {
+            console.warn("    Amazon's show-more reviews control did not return another batch");
+            return false;
+        }
+    }
+
+    await waitForAmazonAccess(page, market, asin);
+    return true;
+}
+
 async function writePageCache(
     market: Market,
     asin: string,
@@ -379,18 +434,22 @@ async function collectPages(
     let pagesVisited = 0;
     let exhausted = false;
     let firstPageHtml: string | undefined;
+    let shouldNavigate = true;
+    let usedShowMorePagination = false;
 
     while (nextUrl && items.length < maximumItems) {
-        if (visitedUrls.has(nextUrl)) {
-            exhausted = true;
-            break;
-        }
-        visitedUrls.add(nextUrl);
+        if (shouldNavigate) {
+            if (visitedUrls.has(nextUrl)) {
+                exhausted = true;
+                break;
+            }
+            visitedUrls.add(nextUrl);
 
-        const response = await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
-        await waitForAmazonAccess(page, market, asin);
-        if (response && !response.ok() && page.url() === response.url()) {
-            throw new Error(`Amazon returned HTTP ${response.status()} for its review page`);
+            const response = await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
+            await waitForAmazonAccess(page, market, asin);
+            if (response && !response.ok() && page.url() === response.url()) {
+                throw new Error(`Amazon returned HTTP ${response.status()} for its review page`);
+            }
         }
 
         await page
@@ -415,6 +474,17 @@ async function collectPages(
             if (items.length === maximumItems) break;
         }
 
+        if (items.length === maximumItems) break;
+        if (newItems > 0 && (await showMoreReviews(page, market, asin))) {
+            shouldNavigate = false;
+            usedShowMorePagination = true;
+            continue;
+        }
+        if (usedShowMorePagination) {
+            exhausted = true;
+            break;
+        }
+
         const candidateNextUrl =
             findNextPageUrl(html, page.url()) ??
             (parsed.length >= 8 ? buildNumberedNextPageUrl(page.url(), pagesVisited) : undefined);
@@ -423,6 +493,7 @@ async function collectPages(
             break;
         }
         nextUrl = candidateNextUrl;
+        shouldNavigate = true;
     }
 
     return { items, pagesVisited, exhausted, firstPageHtml };

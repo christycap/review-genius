@@ -271,7 +271,7 @@ async function requestReviewSentiment(
                         }
                     ],
                     response_format: { type: "json_object" },
-                    max_tokens: 8_192
+                    max_tokens: 32_768
                 }),
                 signal: AbortSignal.timeout(240_000)
             });
